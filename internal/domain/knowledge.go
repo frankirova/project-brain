@@ -63,22 +63,22 @@ type AuditEvent struct {
 }
 
 type SourceInput struct {
-	Type           string
-	URI            string
-	ExternalID     string
-	Title          string
-	IdempotencyKey string
-	Metadata       Metadata
-	CapturedAt     time.Time
+	Type           string    `json:"type"`
+	URI            string    `json:"uri"`
+	ExternalID     string    `json:"external_id"`
+	Title          string    `json:"title"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	Metadata       Metadata  `json:"metadata"`
+	CapturedAt     time.Time `json:"captured_at"`
 }
 
 type ObjectInput struct {
-	Type      string
-	Title     string
-	Summary   string
-	Status    string
-	Metadata  Metadata
-	CreatedBy string
+	Type      string   `json:"type"`
+	Title     string   `json:"title"`
+	Summary   string   `json:"summary"`
+	Status    string   `json:"status"`
+	Metadata  Metadata `json:"metadata"`
+	CreatedBy string   `json:"created_by"`
 }
 
 type IngestTextRequest struct {
@@ -89,10 +89,10 @@ type IngestTextRequest struct {
 }
 
 type IngestTextResult struct {
-	SourceID        uuid.UUID
-	ObjectID        uuid.UUID
-	AuditEventID    uuid.UUID
-	ContentChecksum string
-	IdentityKey     string
-	Duplicate       bool
+	SourceID        uuid.UUID `json:"source_id"`
+	ObjectID        uuid.UUID `json:"object_id"`
+	AuditEventID    uuid.UUID `json:"audit_event_id"`
+	ContentChecksum string    `json:"content_checksum"`
+	IdentityKey     string    `json:"identity_key"`
+	Duplicate       bool      `json:"duplicate"`
 }

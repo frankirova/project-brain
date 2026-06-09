@@ -1,0 +1,103 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+
+	"github.com/frankirova/project-brain/internal/app"
+	"github.com/frankirova/project-brain/internal/domain"
+)
+
+const maxBodyBytes = 1 << 20 // 1 MiB
+
+// IngestTextHandler handles POST /v1/ingest-text requests.
+type IngestTextHandler struct {
+	service *app.IngestTextService
+}
+
+// NewIngestTextHandler creates a new IngestTextHandler.
+func NewIngestTextHandler(svc *app.IngestTextService) *IngestTextHandler {
+	return &IngestTextHandler{service: svc}
+}
+
+// ingestTextRequest is the JSON wire type for incoming requests.
+type ingestTextRequest struct {
+	WorkspaceID string             `json:"workspace_id"`
+	Content     string             `json:"content"`
+	Source      domain.SourceInput `json:"source"`
+	Object      domain.ObjectInput `json:"object"`
+}
+
+// errorResponse is the JSON error wire type.
+type errorResponse struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+	Code    string `json:"code"`
+}
+
+// ServeHTTP decodes the request, calls the service, and writes the response.
+func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
+	var req ingestTextRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, &json.SyntaxError{}) || errors.Is(err, &json.UnmarshalTypeError{}) {
+			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body")
+			return
+		}
+		// MaxBytesReader returns a generic error when the limit is exceeded.
+		if err.Error() == "http: request body too large" {
+			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request body exceeds 1 MiB limit")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body")
+		return
+	}
+
+	domainReq := domain.IngestTextRequest{
+		WorkspaceID: req.WorkspaceID,
+		Content:     req.Content,
+		Source:      req.Source,
+		Object:      req.Object,
+	}
+
+	result, err := h.service.Ingest(r.Context(), domainReq)
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrValidation):
+			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		case errors.Is(err, app.ErrNotFound):
+			writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(result)
+}
+
+// HealthHandler handles GET /v1/health requests.
+type HealthHandler struct{}
+
+// ServeHTTP writes a simple health status response.
+func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// writeError is a helper to write error responses.
+func writeError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(errorResponse{
+		Error:   http.StatusText(status),
+		Message: message,
+		Code:    code,
+	})
+}
