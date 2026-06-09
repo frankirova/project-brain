@@ -1,0 +1,73 @@
+schema: spec-driven
+
+project: hermes-agents
+artifact_store:
+  mode: openspec
+execution_mode: interactive
+chained_pr_strategy: auto-forecast
+review_budget_lines: 400
+detected: 2026-06-09
+
+context: |
+  Tech stack: planning-only repository; PROJECT_BRAIN.md recommends Go, PostgreSQL, pgvector, PostgreSQL FTS, NATS, S3-compatible object storage, Telegram Bot API, OpenTelemetry, Prometheus/Grafana.
+  Architecture: event-driven multi-agent knowledge platform with PostgreSQL-first knowledge core, hybrid RAG, graph-like relations, auditable knowledge artifacts.
+  Testing: no code or test runner detected yet; strict TDD disabled until implementation stack is bootstrapped.
+  Style: documentation-first SDD/OpenSpec workflow; Spanish product source document, English SDD artifacts unless requested otherwise.
+
+strict_tdd: false
+
+testing:
+  strict_tdd: false
+  reason: "No codebase, package manifest, module file, CI workflow, or test runner detected."
+  detected_at: 2026-06-09
+  runner:
+    available: false
+    framework: null
+    command: null
+  layers:
+    unit:
+      available: false
+      tool: null
+    integration:
+      available: false
+      tool: null
+    e2e:
+      available: false
+      tool: null
+  coverage:
+    available: false
+    command: null
+  quality:
+    linter:
+      available: false
+      command: null
+    type_checker:
+      available: false
+      command: null
+    formatter:
+      available: false
+      command: null
+
+rules:
+  proposal:
+    - Lead with the intended outcome and scope before background.
+    - Include rollback plan for risky changes.
+  specs:
+    - Use RFC 2119 keywords: MUST, SHALL, SHOULD, MAY.
+    - Use Given/When/Then scenarios for observable behavior.
+  design:
+    - Document architecture decisions with rationale, alternatives, consequences, and risks.
+    - Include sequence diagrams for complex event-driven or multi-agent flows.
+  tasks:
+    - Group by phase and keep tasks completable in one focused session.
+    - Forecast review size; split work when it is likely to exceed 400 changed lines.
+  apply:
+    - Follow existing code and documentation patterns.
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Preserve archived changes as audit trail; do not delete or rewrite archives.
