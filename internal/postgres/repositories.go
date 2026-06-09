@@ -234,7 +234,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`,
 		relation.TargetObjectID,
 		string(relation.RelationType),
 		relation.Confidence,
-		nullableString(relation.Evidence),
+		relation.Evidence,
 		metadata,
 		relation.CreatedAt,
 	)

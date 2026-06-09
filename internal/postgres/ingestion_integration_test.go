@@ -125,30 +125,41 @@ func openIntegrationDB(t *testing.T) *DB {
 	}
 	t.Cleanup(db.Close)
 
-	migration, err := os.ReadFile(findMigrationPath(t))
-	if err != nil {
-		t.Fatalf("read migration: %v", err)
-	}
-	if _, err := db.pool.Exec(ctx, string(migration)); err != nil {
-		t.Fatalf("apply migration: %v", err)
+	migrations := findMigrations(t)
+	for _, m := range migrations {
+		if _, err := db.pool.Exec(ctx, m); err != nil {
+			t.Fatalf("apply migration: %v", err)
+		}
 	}
 	return db
 }
 
-func findMigrationPath(t *testing.T) string {
+func findMigrations(t *testing.T) []string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get working directory: %v", err)
 	}
 	for {
-		candidate := filepath.Join(dir, "migrations", "0001_knowledge_core_ingestion.sql")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		migrationsDir := filepath.Join(dir, "migrations")
+		if info, err := os.Stat(migrationsDir); err == nil && info.IsDir() {
+			entries, err := filepath.Glob(filepath.Join(migrationsDir, "*.sql"))
+			if err != nil {
+				t.Fatalf("glob migrations: %v", err)
+			}
+			files := make([]string, 0, len(entries))
+			for _, e := range entries {
+				data, err := os.ReadFile(e)
+				if err != nil {
+					t.Fatalf("read migration %s: %v", e, err)
+				}
+				files = append(files, string(data))
+			}
+			return files
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("migration file not found from %s", dir)
+			t.Fatalf("migrations directory not found from %s", dir)
 		}
 		dir = parent
 	}

@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS relations (
     target_object_id UUID NOT NULL REFERENCES knowledge_objects(id) ON DELETE CASCADE,
     relation_type TEXT NOT NULL,
     confidence NUMERIC(4,3) CHECK (confidence >= 0 AND confidence <= 1),
-    evidence TEXT,
+    evidence TEXT NOT NULL DEFAULT '',
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (source_object_id != target_object_id),
