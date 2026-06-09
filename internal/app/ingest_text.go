@@ -85,6 +85,10 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 			CreatedBy:   strings.TrimSpace(prepared.object.CreatedBy),
 			CreatedAt:   createdAt,
 			UpdatedAt:   createdAt,
+			ProjectID:   prepared.object.ProjectID,
+			Tags:        prepared.tags,
+			Confidence:  prepared.object.Confidence,
+			Importance:  prepared.object.Importance,
 		}
 		link := domain.ObjectSource{ObjectID: objectID, SourceID: sourceID, Relevance: 1}
 		auditEvent := domain.AuditEvent{
@@ -141,6 +145,8 @@ type preparedIngestText struct {
 	objectStatus    string
 	source          domain.SourceInput
 	object          domain.ObjectInput
+	// tags is the defaulted (non-nil) copy of req.Object.Tags.
+	tags []string
 }
 
 func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error) {
@@ -170,6 +176,13 @@ func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error)
 	contentChecksum := checksum(content)
 	identityKey := computeIdentityKey(workspaceID, sourceType, req.Source, contentChecksum)
 
+	// Default tags to a non-nil empty slice so writes are predictable and
+	// round-trips preserve a non-nil value.
+	tags := req.Object.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
 	return preparedIngestText{
 		workspaceID:     workspaceID,
 		content:         content,
@@ -180,6 +193,7 @@ func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error)
 		objectStatus:    objectStatus,
 		source:          req.Source,
 		object:          req.Object,
+		tags:            tags,
 	}, nil
 }
 

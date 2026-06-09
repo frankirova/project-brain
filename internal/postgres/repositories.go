@@ -8,7 +8,9 @@ import (
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type repositories struct {
@@ -31,6 +33,11 @@ func (r *repositories) Sources() app.SourceRepository                   { return
 func (r *repositories) KnowledgeObjects() app.KnowledgeObjectRepository { return r.knowledgeObjects }
 func (r *repositories) ObjectSources() app.ObjectSourceRepository       { return r.objectSources }
 func (r *repositories) AuditEvents() app.AuditEventRepository           { return r.auditEvents }
+
+// Relations returns a standalone RelationRepository backed by its own connection.
+func (db *DB) Relations() app.RelationRepository {
+	return &relationRepository{conn: db.pool}
+}
 
 type sourceRepository struct {
 	tx pgx.Tx
@@ -96,9 +103,16 @@ func (r *knowledgeObjectRepository) Create(ctx context.Context, object domain.Kn
 	if err != nil {
 		return err
 	}
+	// tags: pgx maps a Go []string directly to a Postgres TEXT[] column. We
+	// never write nil (IngestTextService defaults it to []string{}), so the
+	// NOT NULL DEFAULT '{}' constraint is satisfied.
+	tags := object.Tags
+	if tags == nil {
+		tags = []string{}
+	}
 	_, err = r.tx.Exec(ctx, `
-INSERT INTO knowledge_objects (id, workspace_id, type, title, summary, content, status, metadata, created_by, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
+INSERT INTO knowledge_objects (id, workspace_id, type, title, summary, content, status, metadata, created_by, created_at, updated_at, project_id, tags, confidence, importance)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)`,
 		object.ID,
 		object.WorkspaceID,
 		object.Type,
@@ -110,6 +124,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
 		nullableString(object.CreatedBy),
 		object.CreatedAt,
 		object.UpdatedAt,
+		nullableUUID(object.ProjectID),
+		tags,
+		nullableFloat64(object.Confidence),
+		nullableInt(object.Importance),
 	)
 	return err
 }
@@ -164,8 +182,121 @@ func nullableString(value string) sql.NullString {
 	return sql.NullString{String: value, Valid: true}
 }
 
+// nullableUUID returns the uuid pointer as-is; pgx maps a nil *uuid.UUID to
+// SQL NULL. A non-nil pointer is passed through unchanged.
+func nullableUUID(value *uuid.UUID) *uuid.UUID {
+	return value
+}
+
+// nullableFloat64 returns the pointer as-is; pgx maps a nil *float64 to SQL
+// NULL. A non-nil pointer is passed through unchanged.
+func nullableFloat64(value *float64) *float64 {
+	return value
+}
+
+// nullableInt returns the pointer as-is; pgx maps a nil *int to SQL NULL.
+// A non-nil pointer is passed through unchanged.
+func nullableInt(value *int) *int {
+	return value
+}
+
 var _ app.SourceRepository = (*sourceRepository)(nil)
 var _ app.KnowledgeObjectRepository = (*knowledgeObjectRepository)(nil)
 var _ app.ObjectSourceRepository = (*objectSourceRepository)(nil)
 var _ app.AuditEventRepository = (*auditEventRepository)(nil)
 var _ app.IngestionRepositories = (*repositories)(nil)
+var _ app.RelationRepository = (*relationRepository)(nil)
+
+// relationRepository is a standalone repository for typed directed edges.
+// Unlike the ingestion repositories, it operates on its own pgx connection
+// rather than being bound to a transaction.
+type relationRepository struct {
+	conn *pgxpool.Pool
+}
+
+func (r *relationRepository) Create(ctx context.Context, relation domain.Relation) error {
+	if !domain.ValidateRelationType(relation.RelationType) {
+		return errors.New("invalid relation type: " + string(relation.RelationType))
+	}
+	if relation.SourceObjectID == relation.TargetObjectID {
+		return errors.New("source and target object must be different")
+	}
+	metadata, err := marshalMetadata(relation.Metadata)
+	if err != nil {
+		return err
+	}
+	_, err = r.conn.Exec(ctx, `
+INSERT INTO relations (id, workspace_id, source_object_id, target_object_id, relation_type, confidence, evidence, metadata, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`,
+		relation.ID,
+		relation.WorkspaceID,
+		relation.SourceObjectID,
+		relation.TargetObjectID,
+		string(relation.RelationType),
+		relation.Confidence,
+		nullableString(relation.Evidence),
+		metadata,
+		relation.CreatedAt,
+	)
+	return err
+}
+
+func (r *relationRepository) FindBySourceObjectID(ctx context.Context, workspaceID string, objectID uuid.UUID) ([]domain.Relation, error) {
+	rows, err := r.conn.Query(ctx, `
+SELECT id, workspace_id, source_object_id, target_object_id, relation_type, confidence, evidence, metadata, created_at
+FROM relations
+WHERE workspace_id = $1 AND source_object_id = $2`, workspaceID, objectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRelations(rows)
+}
+
+func (r *relationRepository) FindByTargetObjectID(ctx context.Context, workspaceID string, objectID uuid.UUID) ([]domain.Relation, error) {
+	rows, err := r.conn.Query(ctx, `
+SELECT id, workspace_id, source_object_id, target_object_id, relation_type, confidence, evidence, metadata, created_at
+FROM relations
+WHERE workspace_id = $1 AND target_object_id = $2`, workspaceID, objectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRelations(rows)
+}
+
+func (r *relationRepository) FindByType(ctx context.Context, workspaceID string, relType domain.RelationType) ([]domain.Relation, error) {
+	rows, err := r.conn.Query(ctx, `
+SELECT id, workspace_id, source_object_id, target_object_id, relation_type, confidence, evidence, metadata, created_at
+FROM relations
+WHERE workspace_id = $1 AND relation_type = $2`, workspaceID, string(relType))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanRelations(rows)
+}
+
+func scanRelations(rows pgx.Rows) ([]domain.Relation, error) {
+	var relations []domain.Relation
+	for rows.Next() {
+		var rel domain.Relation
+		var relType string
+		if err := rows.Scan(
+			&rel.ID,
+			&rel.WorkspaceID,
+			&rel.SourceObjectID,
+			&rel.TargetObjectID,
+			&relType,
+			&rel.Confidence,
+			&rel.Evidence,
+			&rel.Metadata,
+			&rel.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		rel.RelationType = domain.RelationType(relType)
+		relations = append(relations, rel)
+	}
+	return relations, rows.Err()
+}
