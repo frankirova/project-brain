@@ -39,12 +39,12 @@ Chain strategy: pending
 
 ## Phase 3: PostgreSQL Persistence
 
-- [ ] 3.1 Create `migrations/0001_knowledge_core_ingestion.sql` for `sources`, `knowledge_objects`, `object_sources`, and `audit_events` with FKs and `UNIQUE(workspace_id, identity_key)`.
-- [ ] 3.2 Create `internal/postgres/db.go` and repository files implementing unit of work, insert, duplicate lookup, link, audit, and rollback behavior.
-- [ ] 3.3 Add `internal/postgres/ingestion_integration_test.go` gated by `PROJECT_BRAIN_TEST_DATABASE_DSN`; verify all-or-nothing persistence.
+- [x] 3.1 Create `migrations/0001_knowledge_core_ingestion.sql` for `sources`, `knowledge_objects`, `object_sources`, and `audit_events` with FKs and `UNIQUE(workspace_id, identity_key)`.
+- [x] 3.2 Create `internal/postgres/db.go` and repository files implementing unit of work, insert, duplicate lookup, link, audit, and rollback behavior.
+- [x] 3.3 Add `internal/postgres/ingestion_integration_test.go` gated by `PROJECT_BRAIN_TEST_DATABASE_DSN`; verify all-or-nothing persistence.
 
 ## Phase 4: Verification and Scope Guard
 
-- [ ] 4.1 Run `go test ./...`; confirm unit tests pass and integration tests skip cleanly without DSN.
-- [ ] 4.2 Verify accepted ingestion creates exactly one source, object, link, and audit event; duplicate returns existing result without new audit event.
-- [ ] 4.3 Confirm no Telegram, embeddings, RAG, NATS, S3, workers, agents, retrieval, or FTS code was introduced.
+- [x] 4.1 Run `go test ./...`; confirm unit tests pass and integration tests skip cleanly without DSN.
+- [x] 4.2 Verify accepted ingestion creates exactly one source, object, link, and audit event; duplicate returns existing result without new audit event.
+- [x] 4.3 Confirm no Telegram, embeddings, RAG, NATS, S3, workers, agents, retrieval, or FTS code was introduced.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gentle-ai/hermes-agents/internal/domain"
+	"github.com/frankirova/project-brain/internal/domain"
 )
 
 var ErrNotFound = errors.New("not found")

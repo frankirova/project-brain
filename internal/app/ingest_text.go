@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gentle-ai/hermes-agents/internal/domain"
+	"github.com/frankirova/project-brain/internal/domain"
 	"github.com/google/uuid"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gentle-ai/hermes-agents/internal/config"
+	"github.com/frankirova/project-brain/internal/config"
 )
 
 func main() {

@@ -36,3 +36,6 @@ temp/
 data/
 storage/
 uploads/
+
+# Local learning notes
+GO_CODE_WALKTHROUGH.md
