@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,9 +18,12 @@ import (
 )
 
 func main() {
+	logger := newLogger(os.Getenv("PROJECT_BRAIN_ENV"))
+	slog.SetDefault(logger)
+
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		logger.Error("load config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
@@ -33,14 +36,16 @@ func main() {
 	if cfg.DatabaseDSN != "" {
 		db, err := postgres.Open(ctx, cfg.DatabaseDSN)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "open database: %v\n", err)
+			logger.Error("open database", slog.String("error", err.Error()))
 			os.Exit(1)
 		}
 		uow = db
 		dbCloser = db.Close
+		logger.Info("postgres connection opened")
 	} else {
 		uow = newInMemoryUOW()
 		dbCloser = func() {}
+		logger.Warn("running with in-memory uow", slog.String("reason", "PROJECT_BRAIN_DATABASE_DSN unset"))
 	}
 
 	svc := app.NewIngestTextService(uow)
@@ -56,9 +61,11 @@ func main() {
 	}
 
 	go func() {
-		fmt.Printf("project-brain api listening port=%s environment=%s\n", cfg.Port, cfg.Environment)
+		logger.Info("http server starting",
+			slog.String("port", cfg.Port),
+			slog.String("environment", cfg.Environment))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "listen: %v\n", err)
+			logger.Error("http server failed", slog.String("error", err.Error()))
 			os.Exit(1)
 		}
 	}()
@@ -70,31 +77,50 @@ func main() {
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),
 		)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "telegram bot init: %v\n", err)
+			logger.Error("telegram bot init", slog.String("error", err.Error()))
 		} else {
 			tgHandler.SetBot(b)
 			go func() {
-				fmt.Println("telegram bot starting (polling)")
+				logger.Info("telegram bot starting", slog.String("mode", "polling"))
 				b.Start(ctx) // blocks until ctx is cancelled
 			}()
 		}
 	} else {
-		fmt.Println("telegram bot skipped (no PROJECT_BRAIN_TELEGRAM_BOT_TOKEN)")
+		logger.Info("telegram bot skipped", slog.String("reason", "PROJECT_BRAIN_TELEGRAM_BOT_TOKEN unset"))
 	}
 
 	// Wait for shutdown signal.
 	<-ctx.Done()
+	logger.Info("shutdown signal received")
 
 	// Give in-flight requests up to the configured timeout to complete.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout())
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "shutdown: %v\n", err)
+		logger.Error("http shutdown", slog.String("error", err.Error()))
 	}
 
 	dbCloser()
-	fmt.Println("project-brain api stopped")
+	logger.Info("project-brain api stopped")
+}
+
+// newLogger returns a slog.Logger configured per environment. Production
+// uses JSON for log aggregation; development uses text for readability.
+func newLogger(env string) *slog.Logger {
+	level := slog.LevelInfo
+	if env == "development" {
+		level = slog.LevelDebug
+	}
+	opts := &slog.HandlerOptions{Level: level}
+
+	var handler slog.Handler
+	if env == "production" {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+	return slog.New(handler)
 }
 
 // inMemoryUOW is a minimal in-memory fake for development without PostgreSQL.
