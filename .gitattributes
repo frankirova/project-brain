@@ -1,0 +1,28 @@
+# Force LF line endings for text files to keep diffs clean across platforms.
+# Git will warn or auto-convert otherwise on Windows checkouts.
+
+* text=auto eol=lf
+
+# Shell scripts must always be LF.
+*.sh text eol=lf
+
+# Go source must be LF (Go tooling expects LF).
+*.go text eol=lf
+
+# YAML, JSON, TOML, Markdown.
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+
+# SQL migrations.
+*.sql text eol=lf
+
+# Explicitly mark binary files to avoid text detection.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
