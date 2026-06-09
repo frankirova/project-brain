@@ -1,0 +1,38 @@
+# Binaries and build output
+bin/
+build/
+dist/
+*.exe
+*.test
+*.out
+
+# Go tooling
+coverage.out
+*.coverprofile
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.log
+
+# Local storage
+data/
+storage/
+uploads/
