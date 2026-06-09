@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/frankirova/project-brain/internal/domain"
+	"github.com/google/uuid"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -35,4 +36,11 @@ type ObjectSourceRepository interface {
 
 type AuditEventRepository interface {
 	Create(ctx context.Context, event domain.AuditEvent) error
+}
+
+type RelationRepository interface {
+	Create(ctx context.Context, relation domain.Relation) error
+	FindBySourceObjectID(ctx context.Context, workspaceID string, objectID uuid.UUID) ([]domain.Relation, error)
+	FindByTargetObjectID(ctx context.Context, workspaceID string, objectID uuid.UUID) ([]domain.Relation, error)
+	FindByType(ctx context.Context, workspaceID string, relType domain.RelationType) ([]domain.Relation, error)
 }
