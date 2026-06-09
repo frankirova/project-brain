@@ -206,6 +206,76 @@ func TestIdentityKeyAllowsSameContentFromDistinctSources(t *testing.T) {
 	}
 }
 
+func TestIngestPersistsNewMetadataFields(t *testing.T) {
+	projectID := uuid.MustParse("40000000-0000-0000-0000-000000000001")
+	confidence := 0.92
+	importance := 80
+
+	ids := fixedIDs{
+		uuid.MustParse("40000000-0000-0000-0000-000000000002"),
+		uuid.MustParse("40000000-0000-0000-0000-000000000003"),
+		uuid.MustParse("40000000-0000-0000-0000-000000000004"),
+	}
+	uow := newFakeUOW()
+	service := NewIngestTextServiceWithDependencies(uow, ids.next, time.Now)
+
+	_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+		WorkspaceID: "workspace-1",
+		Content:     "knowledge with project and importance",
+		Source:      domain.SourceInput{Type: "manual"},
+		Object: domain.ObjectInput{
+			Type:       "decision",
+			ProjectID:  &projectID,
+			Tags:       []string{"go", "postgres"},
+			Confidence: &confidence,
+			Importance: &importance,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Ingest() returned error: %v", err)
+	}
+
+	if got, want := uow.repos.writeCount(), 4; got != want {
+		t.Fatalf("writes=%d, want 4 (source/object/link/audit) with all four new fields populated", got)
+	}
+
+	object := uow.repos.object.created[0]
+	if object.ProjectID == nil || *object.ProjectID != projectID {
+		t.Fatalf("object.ProjectID = %v, want %v", object.ProjectID, projectID)
+	}
+	if len(object.Tags) != 2 || object.Tags[0] != "go" || object.Tags[1] != "postgres" {
+		t.Fatalf("object.Tags = %v, want [go postgres]", object.Tags)
+	}
+	if object.Confidence == nil || *object.Confidence != confidence {
+		t.Fatalf("object.Confidence = %v, want %v", object.Confidence, confidence)
+	}
+	if object.Importance == nil || *object.Importance != importance {
+		t.Fatalf("object.Importance = %v, want %v", object.Importance, importance)
+	}
+}
+
+func TestIngestDefaultsNilTagsToEmptySlice(t *testing.T) {
+	uow := newFakeUOW()
+	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now)
+
+	_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+		WorkspaceID: "workspace-1",
+		Content:     "knowledge without tags",
+		Object:      domain.ObjectInput{Type: "document"},
+	})
+	if err != nil {
+		t.Fatalf("Ingest() returned error: %v", err)
+	}
+
+	object := uow.repos.object.created[0]
+	if object.Tags == nil {
+		t.Fatal("object.Tags = nil, want non-nil empty slice")
+	}
+	if len(object.Tags) != 0 {
+		t.Fatalf("object.Tags = %v, want empty slice", object.Tags)
+	}
+}
+
 type fakeUOW struct {
 	repos      *fakeRepos
 	started    bool
