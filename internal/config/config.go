@@ -9,7 +9,7 @@ import (
 
 const (
 	defaultEnvironment = "development"
-	defaultPort        = "8080"
+	defaultPort        = "8050"
 	defaultShutdownSec = 5
 )
 
@@ -17,10 +17,11 @@ const (
 // scaffold. Persistence settings are present but optional until the
 // PostgreSQL implementation work unit is introduced.
 type Config struct {
-	Environment  string
-	Port         string
-	DatabaseDSN  string
-	ShutdownSecs int
+	Environment      string
+	Port             string
+	DatabaseDSN      string
+	ShutdownSecs     int
+	TelegramBotToken string
 }
 
 // ShutdownTimeout returns the configured shutdown grace period.
@@ -36,10 +37,11 @@ func (c Config) ShutdownTimeout() time.Duration {
 // defaults so the scaffold can run without external services.
 func Load() (Config, error) {
 	cfg := Config{
-		Environment:  valueOrDefault("PROJECT_BRAIN_ENV", defaultEnvironment),
-		Port:         valueOrDefault("PROJECT_BRAIN_API_PORT", defaultPort),
-		DatabaseDSN:  os.Getenv("PROJECT_BRAIN_DATABASE_DSN"),
-		ShutdownSecs: intEnvOrDefault("PROJECT_BRAIN_SHUTDOWN_SECS", defaultShutdownSec),
+		Environment:      valueOrDefault("PROJECT_BRAIN_ENV", defaultEnvironment),
+		Port:             valueOrDefault("PROJECT_BRAIN_API_PORT", defaultPort),
+		DatabaseDSN:      os.Getenv("PROJECT_BRAIN_DATABASE_DSN"),
+		ShutdownSecs:     intEnvOrDefault("PROJECT_BRAIN_SHUTDOWN_SECS", defaultShutdownSec),
+		TelegramBotToken: os.Getenv("PROJECT_BRAIN_TELEGRAM_BOT_TOKEN"),
 	}
 
 	if err := validatePort(cfg.Port); err != nil {

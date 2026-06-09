@@ -13,6 +13,8 @@ import (
 	"github.com/frankirova/project-brain/internal/domain"
 	"github.com/frankirova/project-brain/internal/httpapi"
 	"github.com/frankirova/project-brain/internal/postgres"
+	"github.com/frankirova/project-brain/internal/telegram"
+	tgbot "github.com/go-telegram/bot"
 )
 
 func main() {
@@ -60,6 +62,25 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// Telegram bot: start polling only if token is configured.
+	if cfg.TelegramBotToken != "" {
+		tgHandler := telegram.NewHandler(svc, nil)
+		b, err := tgbot.New(cfg.TelegramBotToken,
+			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "telegram bot init: %v\n", err)
+		} else {
+			tgHandler.SetBot(b)
+			go func() {
+				fmt.Println("telegram bot starting (polling)")
+				b.Start(ctx) // blocks until ctx is cancelled
+			}()
+		}
+	} else {
+		fmt.Println("telegram bot skipped (no PROJECT_BRAIN_TELEGRAM_BOT_TOKEN)")
+	}
 
 	// Wait for shutdown signal.
 	<-ctx.Done()
