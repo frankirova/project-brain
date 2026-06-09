@@ -32,10 +32,10 @@ Chain strategy: pending
 
 ## Phase 2: Domain and Ingestion Use Case
 
-- [ ] 2.1 Create `internal/domain/knowledge.go` with `Source`, `KnowledgeObject`, `ObjectSource`, `AuditEvent`, request, result, and metadata types.
-- [ ] 2.2 Create `internal/app/ports.go` with repository and unit-of-work interfaces for transaction-scoped ingestion.
-- [ ] 2.3 Create `internal/app/ingest_text.go` with workspace/content validation, checksum, identity key computation, duplicate lookup, and transactional orchestration.
-- [ ] 2.4 Add `internal/app/ingest_text_test.go` covering valid ingestion, whitespace rejection with no writes, duplicate idempotency, and no deferred Telegram/RAG dependencies.
+- [x] 2.1 Create `internal/domain/knowledge.go` with `Source`, `KnowledgeObject`, `ObjectSource`, `AuditEvent`, request, result, and metadata types.
+- [x] 2.2 Create `internal/app/ports.go` with repository and unit-of-work interfaces for transaction-scoped ingestion.
+- [x] 2.3 Create `internal/app/ingest_text.go` with workspace/content validation, checksum, identity key computation, duplicate lookup, and transactional orchestration.
+- [x] 2.4 Add `internal/app/ingest_text_test.go` covering valid ingestion, whitespace rejection with no writes, duplicate idempotency, and no deferred Telegram/RAG dependencies.
 
 ## Phase 3: PostgreSQL Persistence
 
