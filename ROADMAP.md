@@ -186,9 +186,11 @@ Esto es lo que define `PROJECT_BRAIN.md` sección 8. Los agentes especializados 
 **Fase 2 progreso:**
 - ✅ `Retriever` port (C4 cerrado)
 - ✅ `FTSRetriever` + endpoint `GET /v1/search`
-- ⏳ Embeddings con pgvector (próximo)
-- ⏳ Composite retriever (FTS + vector + structured)
+- ✅ Embeddings con pgvector (migration 0007, EmbeddingRepo, vectorRetriever)
+- ✅ `CompositeRetriever` con Reciprocal Rank Fusion (merge FTS + vector)
+- ⏳ Hydration del composite (actualmente retorna stubs con solo ID)
 - ⏳ `/v1/objects/:id` endpoint
+- ⏳ Wire del composite en main.go con config flag
 
 **Fase 1 cerrado** con 5 cambios archived + **dos sprints de calidad** (slog, rate limit, auth, CI, .gitattributes, fix del test de relations + 25 commits del audit post-Fase 1).
 
