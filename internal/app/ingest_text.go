@@ -171,7 +171,7 @@ type preparedIngestText struct {
 }
 
 func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error) {
-	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	workspaceID := strings.ToLower(strings.TrimSpace(req.WorkspaceID))
 	if workspaceID == "" {
 		return preparedIngestText{}, fmt.Errorf("%w: workspace_id is required", ErrValidation)
 	}
