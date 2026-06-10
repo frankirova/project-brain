@@ -25,6 +25,21 @@ type CompositeRetriever struct {
 	primaries []Retriever
 	k         int // RRF constant; smaller = more weight to top results
 	limit     int
+	hydrator  ObjectHydrator
+}
+
+// ObjectHydrator loads a KnowledgeObject by ID. The composite uses
+// it to turn the merged hit IDs into full objects before returning.
+// Errors are non-fatal: a missing or deleted object becomes a stub
+// with just the ID set.
+type ObjectHydrator interface {
+	FindByID(ctx context.Context, workspaceID string, id uuid.UUID) (*domain.KnowledgeObject, error)
+}
+
+// SetHydrator attaches a hydrator. Optional: without one, the
+// composite returns stubs with just the ID set.
+func (c *CompositeRetriever) SetHydrator(h ObjectHydrator) {
+	c.hydrator = h
 }
 
 // NewCompositeRetriever returns a composite that fans out to all
@@ -42,15 +57,9 @@ func NewCompositeRetriever(primaries []Retriever, k, limit int) *CompositeRetrie
 }
 
 // Search fans out to each retriever in parallel, merges with RRF,
-// and returns the top `limit` results hydrated into SearchResult
-// structs.
-//
-// Note: the current implementation does not hydrate from the
-// underlying KnowledgeObject — it just returns the merged
-// ScoredSearchHit list via a synthetic SearchResult with the
-// ObjectID string. Hydration is the responsibility of the HTTP
-// handler or a future refinement. This is intentional for the
-// first cut: keeps the composite testable without a DB.
+// hydrates the top hits via the ObjectHydrator, and returns the
+// merged result set. If a hydrator is not configured, returns stubs
+// with only the ID set (useful for unit tests and dev).
 func (c *CompositeRetriever) Search(ctx context.Context, q SearchQuery) ([]SearchResult, error) {
 	if len(c.primaries) == 0 {
 		return nil, nil
@@ -103,7 +112,6 @@ func (c *CompositeRetriever) Search(ctx context.Context, q SearchQuery) ([]Searc
 
 	// RRF merge.
 	scores := make(map[string]float64)
-	matchTypes := make(map[string][]string)
 	for _, byRet := range hitSet {
 		// Sort hits per retriever by score desc so ranks are
 		// meaningful.
@@ -114,11 +122,11 @@ func (c *CompositeRetriever) Search(ctx context.Context, q SearchQuery) ([]Searc
 		sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 		for rank, h := range hits {
 			scores[h.ObjectID] += 1.0 / float64(c.k+rank+1)
-			matchTypes[h.ObjectID] = append(matchTypes[h.ObjectID], h.MatchType)
 		}
 	}
 
-	// Take top N.
+	// Take top N before hydration so the hydrator does not load
+	// objects that will be discarded.
 	type scored struct {
 		id    string
 		score float64
@@ -146,13 +154,34 @@ func (c *CompositeRetriever) Search(ctx context.Context, q SearchQuery) ([]Searc
 				bestType = h.MatchType
 			}
 		}
+		obj := c.hydrate(ctx, q.WorkspaceID, s.id)
 		out = append(out, SearchResult{
-			Object:    objectFromID(s.id),
+			Object:    obj,
 			Score:     s.score,
 			MatchType: bestType,
 		})
 	}
 	return out, nil
+}
+
+// hydrate loads the KnowledgeObject by ID, scoped to the workspace.
+// Returns a stub with just the ID if no hydrator is set or the
+// object no longer exists. The empty (zero-value) case is also a
+// valid fallback when the hydrator returns (nil, nil) — for
+// example when a vector search returned a hit for a deleted object.
+func (c *CompositeRetriever) hydrate(ctx context.Context, workspaceID, idStr string) domain.KnowledgeObject {
+	if c.hydrator == nil {
+		return objectFromID(idStr)
+	}
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return domain.KnowledgeObject{}
+	}
+	obj, err := c.hydrator.FindByID(ctx, workspaceID, id)
+	if err != nil || obj == nil {
+		return objectFromID(idStr)
+	}
+	return *obj
 }
 
 // objectFromID returns a KnowledgeObject stub with just the ID set.

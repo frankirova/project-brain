@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/frankirova/project-brain/internal/domain"
+	"github.com/google/uuid"
 )
 
 type fakeRet struct {
@@ -118,5 +121,76 @@ func TestCompositeEmptyPrimaryList(t *testing.T) {
 	}
 	if results != nil {
 		t.Fatalf("results = %v, want nil", results)
+	}
+}
+
+type fakeHydrator struct {
+	obj *domain.KnowledgeObject
+	err error
+}
+
+func (f *fakeHydrator) FindByID(_ context.Context, _ string, _ uuid.UUID) (*domain.KnowledgeObject, error) {
+	return f.obj, f.err
+}
+
+func TestCompositeHydratesResults(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	hydrated := &domain.KnowledgeObject{
+		ID:      id,
+		Title:   "Real title",
+		Content: "real content",
+		Status:  domain.KnowledgeObjectStatusValidated,
+	}
+
+	fts := &fakeRet{
+		hits: []SearchResult{
+			{Object: objectFromID(id.String()), Score: 0.9, MatchType: "fts"},
+		},
+	}
+	c := NewCompositeRetriever([]Retriever{fts}, 60, 10)
+	c.SetHydrator(&fakeHydrator{obj: hydrated})
+
+	results, err := c.Search(context.Background(), SearchQuery{Text: "x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1", len(results))
+	}
+	if results[0].Object.Title != "Real title" {
+		t.Fatalf("hydrated title = %q, want %q", results[0].Object.Title, "Real title")
+	}
+	if results[0].Object.Status != domain.KnowledgeObjectStatusValidated {
+		t.Fatalf("hydrated status = %q, want %q", results[0].Object.Status, domain.KnowledgeObjectStatusValidated)
+	}
+}
+
+func TestCompositeHydrationFallback(t *testing.T) {
+	// Hydrator returns an error (e.g., object deleted between
+	// embedding scan and hydration). The composite should fall
+	// back to a stub with just the ID rather than failing the
+	// whole search.
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	fts := &fakeRet{
+		hits: []SearchResult{
+			{Object: objectFromID(id.String()), Score: 0.9, MatchType: "fts"},
+		},
+	}
+	c := NewCompositeRetriever([]Retriever{fts}, 60, 10)
+	c.SetHydrator(&fakeHydrator{err: errors.New("not found")})
+
+	results, err := c.Search(context.Background(), SearchQuery{Text: "x", WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatalf("Search should not error on hydrator failure: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %d, want 1 (fallback stub)", len(results))
+	}
+	// Stub has just the ID, no content.
+	if results[0].Object.ID != id {
+		t.Fatalf("fallback ID = %v, want %v", results[0].Object.ID, id)
+	}
+	if results[0].Object.Title != "" {
+		t.Fatalf("fallback title = %q, want empty", results[0].Object.Title)
 	}
 }
