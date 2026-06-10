@@ -194,9 +194,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
 	return err
 }
 
+// marshalMetadata encodes Metadata for a JSONB column. A nil map
+// becomes SQL NULL, an empty map becomes '{}'. This preserves the
+// distinction between "no metadata" and "explicitly empty metadata",
+// which matters for Fase 3's "cleared on validate" semantics.
 func marshalMetadata(metadata domain.Metadata) ([]byte, error) {
 	if metadata == nil {
-		metadata = domain.Metadata{}
+		return nil, nil
 	}
 	return json.Marshal(metadata)
 }
