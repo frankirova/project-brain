@@ -59,3 +59,27 @@ type ScoredSearchHit struct {
 	// it for observability of retrieval freshness.
 	FoundAt time.Time
 }
+
+// Embedder generates a vector representation of a text. The
+// implementation is intentionally not specified here — it could be
+// an OpenAI HTTP call, a local ONNX runtime, or a stub for tests.
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+	// Dimensions is the vector size this embedder produces. Used by
+	// the repository to validate before insert.
+	Dimensions() int
+	// Model is the identifier persisted in embeddings.model. Useful
+	// for distinguishing embeddings from different providers when
+	// reranking or debugging.
+	Model() string
+}
+
+// EmbeddingRepository persists and reads vectors. Search uses cosine
+// distance via pgvector's <=> operator.
+type EmbeddingRepository interface {
+	// Upsert inserts or replaces the embedding for (workspace_id, object_id).
+	Upsert(ctx context.Context, emb domain.Embedding) error
+	// FindSimilar returns the workspace's objects closest to the query
+	// vector by cosine distance. Limit caps the result count.
+	FindSimilar(ctx context.Context, workspaceID string, query []float32, limit int) ([]ScoredSearchHit, error)
+}
