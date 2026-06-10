@@ -22,7 +22,7 @@ El server queda en `http://localhost:8050`. Postgres en `localhost:5433`.
 ### Endpoints HTTP
 
 ```sh
-# Health check (no requiere auth)
+# Health check (público, no requiere auth)
 curl http://localhost:8050/v1/health
 
 # Ingestar texto (requiere bearer token si PROJECT_BRAIN_AUTH_TOKEN está set)
@@ -36,6 +36,19 @@ curl -X POST http://localhost:8050/v1/ingest-text \
     "object": {"type": "document", "metadata": {"title": "Intro"}}
   }'
 ```
+
+**Endpoints disponibles:**
+
+| Método | Path | Auth | Descripción |
+|--------|------|------|-------------|
+| `GET` | `/v1/health` | No | Liveness probe. Retorna `{"status":"ok"}` |
+| `POST` | `/v1/ingest-text` | Bearer (si configurado) | Ingesta de texto. Rate limit per-IP |
+
+**Búsqueda full-text:** el FTS column existe y se popula automáticamente en cada ingest, pero **no hay endpoint HTTP para consultarlo todavía**. Eso entra en Fase 2 (Hybrid RAG) del roadmap. Por ahora, para buscar:
+
+```sh
+docker exec hermes-agents-postgres-1 psql -U postgres -d project_brain -c \
+  "SELECT id, title FROM knowledge_objects WHERE search_vector @@ to_tsquery('simple', 'conocimiento')"
 
 ### Bot de Telegram (opcional)
 
