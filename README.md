@@ -43,12 +43,39 @@ curl -X POST http://localhost:8050/v1/ingest-text \
 |--------|------|------|-------------|
 | `GET` | `/v1/health` | No | Liveness probe. Retorna `{"status":"ok"}` |
 | `POST` | `/v1/ingest-text` | Bearer (si configurado) | Ingesta de texto. Rate limit per-IP |
+| `GET` | `/v1/search` | Bearer (si configurado) | Búsqueda FTS. Query params: `q`, `workspace_id`, `limit` |
 
-**Búsqueda full-text:** el FTS column existe y se popula automáticamente en cada ingest, pero **no hay endpoint HTTP para consultarlo todavía**. Eso entra en Fase 2 (Hybrid RAG) del roadmap. Por ahora, para buscar:
+Ejemplo:
+```sh
+curl -G http://localhost:8050/v1/search \
+  --data-urlencode "q=postgresql" \
+  --data-urlencode "workspace_id=mi-ws" \
+  --data-urlencode "limit=5" \
+  -H "Authorization: Bearer $PROJECT_BRAIN_AUTH_TOKEN"
+```
+
+Retorna:
+```json
+{
+  "query": "postgresql",
+  "count": 3,
+  "results": [
+    {"object": {...}, "score": 0.95, "match_type": "fts"},
+    ...
+  ]
+}
+```
+
+El endpoint solo se registra cuando hay Postgres backend (FTS necesita el `search_vector` column; in-memory mode no tiene corpus).
+
+**Búsqueda full-text:** el FTS column existe y se popula automáticamente en cada ingest, y hay un endpoint HTTP `GET /v1/search` (ver arriba). Para inspeccionar la columna directamente:
 
 ```sh
 docker exec hermes-agents-postgres-1 psql -U postgres -d project_brain -c \
-  "SELECT id, title FROM knowledge_objects WHERE search_vector @@ to_tsquery('simple', 'conocimiento')"
+  "SELECT id, title, ts_rank(search_vector, to_tsquery('simple', 'conocimiento')) AS rank
+   FROM knowledge_objects
+   WHERE search_vector @@ to_tsquery('simple', 'conocimiento')
+   ORDER BY rank DESC"
 
 ### Bot de Telegram (opcional)
 
@@ -126,6 +153,7 @@ project-brain/
 | `telegram-bot-adapter` | [spec](openspec/specs/telegram-bot-adapter/spec.md) | Bot de Telegram que ingesta mensajes |
 | `http-ingest-api` | (merged into knowledge-core-ingestion) | Adaptador HTTP |
 | `knowledge-relations` | [spec](openspec/specs/knowledge-relations/spec.md) | Aristas tipadas entre knowledge objects |
+| `fts-retrieval` | (en código, spec pendiente) | Búsqueda por keyword vía FTS |
 
 Ver `ROADMAP.md` para el plan completo (Fase 2: Hybrid RAG, Fase 3: Human-in-the-Loop, Fase 4: Multi-agent).
 

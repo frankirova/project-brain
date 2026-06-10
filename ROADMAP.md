@@ -178,16 +178,21 @@ Esto es lo que define `PROJECT_BRAIN.md` sección 8. Los agentes especializados 
 
 ```
 [✅] Fase 1: Foundation (5 cambios archived + 2 sprints de calidad)
-[→]  Fase 2: Hybrid RAG (próxima)
+[🚀] Fase 2: Hybrid RAG (en curso)
 [ ]  Fase 3: Human-in-the-Loop Validation
 [ ]  Fase 4: Multi-agent Platform
 ```
 
-**Fase actual:** cerramos Fase 1 con 5 cambios archived + **dos sprints de calidad**:
-- **Sprint 1**: slog, rate limit, auth bearer, CI workflow, .gitattributes, fix del test de relations
-- **Sprint 2** (25 commits): los 4 CRITICAL + 8 HIGH + 9 MEDIUM + 5 LOW del audit post-Fase 1
+**Fase 2 progreso:**
+- ✅ `Retriever` port (C4 cerrado)
+- ✅ `FTSRetriever` + endpoint `GET /v1/search`
+- ⏳ Embeddings con pgvector (próximo)
+- ⏳ Composite retriever (FTS + vector + structured)
+- ⏳ `/v1/objects/:id` endpoint
 
-La fundación está lista para Fase 2. Los blockers arquitecturales (status enum, Update method, FTS con tags, queries determinísticas, XFF spoofing, graceful shutdown, etc.) están resueltos.
+**Fase 1 cerrado** con 5 cambios archived + **dos sprints de calidad** (slog, rate limit, auth, CI, .gitattributes, fix del test de relations + 25 commits del audit post-Fase 1).
+
+La fundación está lista. Los blockers arquitecturales (status enum, Update method, FTS con tags, queries determinísticas, XFF spoofing, graceful shutdown, etc.) están resueltos.
 
 ---
 
