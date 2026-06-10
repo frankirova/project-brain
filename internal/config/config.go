@@ -55,6 +55,12 @@ func Load() (Config, error) {
 	if err := validatePort(cfg.Port); err != nil {
 		return Config{}, err
 	}
+	if cfg.RateLimitRPS > 1000 {
+		return Config{}, fmt.Errorf("PROJECT_BRAIN_RATE_LIMIT_RPS=%g exceeds sanity cap of 1000", cfg.RateLimitRPS)
+	}
+	if cfg.RateLimitBurst > 10000 {
+		return Config{}, fmt.Errorf("PROJECT_BRAIN_RATE_LIMIT_BURST=%g exceeds sanity cap of 10000", cfg.RateLimitBurst)
+	}
 
 	return cfg, nil
 }
