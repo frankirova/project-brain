@@ -98,13 +98,14 @@ func TestLimiterRefills(t *testing.T) {
 	}
 }
 
-func TestLimiterHonorsXForwardedFor(t *testing.T) {
-	l := New(1, 1, time.Minute)
+func TestLimiterIgnoresXForwardedForByDefault(t *testing.T) {
+	l := New(1, 2, time.Minute)
 	handler := l.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// Two requests from different X-Forwarded-For should not share a bucket.
+	// Two requests with different XFF should share a bucket when
+	// trustProxy is false (default) — both key on RemoteAddr.
 	for i, ip := range []string{"10.0.0.1", "10.0.0.2"} {
 		req := httptest.NewRequest("GET", "/", nil)
 		req.RemoteAddr = "127.0.0.1:5000"
@@ -113,6 +114,38 @@ func TestLimiterHonorsXForwardedFor(t *testing.T) {
 		handler.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("xff request %d (%s): code = %d, want 200", i, ip, rr.Code)
+		}
+	}
+
+	// Third request with the same RemoteAddr but different XFF must be
+	// rate-limited (bucket empty).
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "127.0.0.1:5000"
+	req.Header.Set("X-Forwarded-For", "10.0.0.3")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("untrusted XFF: code = %d, want 429 (bucket should be shared)", rr.Code)
+	}
+}
+
+func TestLimiterHonorsXForwardedForWhenTrusted(t *testing.T) {
+	l := New(1, 2, time.Minute)
+	l.SetTrustProxy(true)
+	handler := l.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Different XFF values, same RemoteAddr: with trustProxy enabled,
+	// each request gets its own bucket.
+	for i, ip := range []string{"10.0.0.1", "10.0.0.2"} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "127.0.0.1:5000"
+		req.Header.Set("X-Forwarded-For", ip)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("trusted xff request %d (%s): code = %d, want 200", i, ip, rr.Code)
 		}
 	}
 }

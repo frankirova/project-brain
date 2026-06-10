@@ -13,12 +13,13 @@ import (
 
 // Limiter holds per-IP token buckets.
 type Limiter struct {
-	mu       sync.Mutex
-	buckets  map[string]*bucket
-	rate     float64 // tokens per second
-	burst    float64 // max tokens
-	idleTTL  time.Duration
-	lastSeen map[string]time.Time
+	mu         sync.Mutex
+	buckets    map[string]*bucket
+	rate       float64 // tokens per second
+	burst      float64 // max tokens
+	idleTTL    time.Duration
+	lastSeen   map[string]time.Time
+	trustProxy bool
 }
 
 type bucket struct {
@@ -39,6 +40,15 @@ func New(rate, burst float64, idleTTL time.Duration) *Limiter {
 	}
 	go l.gcLoop()
 	return l
+}
+
+// SetTrustProxy toggles whether X-Forwarded-For is honored. When false
+// (the default), the limiter keys on r.RemoteAddr to prevent clients
+// from spoofing the header to bypass the bucket.
+func (l *Limiter) SetTrustProxy(trust bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.trustProxy = trust
 }
 
 func (l *Limiter) gcLoop() {
@@ -85,13 +95,17 @@ func (l *Limiter) allow(ip string) bool {
 	return true
 }
 
-// clientIP extracts a best-effort client IP from r, honoring X-Forwarded-For.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
+// clientIP extracts a best-effort client IP from r. When trustProxy
+// is false (the default), X-Forwarded-For is ignored to prevent
+// header spoofing.
+func (l *Limiter) clientIP(r *http.Request) string {
+	if l.trustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				return strings.TrimSpace(xff[:i])
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -103,7 +117,7 @@ func clientIP(r *http.Request) string {
 // Middleware returns an http middleware that enforces the rate limit.
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := l.clientIP(r)
 		if !l.allow(ip) {
 			w.Header().Set("Retry-After", "1")
 			w.Header().Set("Content-Type", "application/json")

@@ -66,9 +66,11 @@ func main() {
 	protectedMux.Handle("POST /v1/ingest-text", handler)
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
+	limiter.SetTrustProxy(cfg.TrustProxy)
 	logger.Info("rate limit enabled",
 		slog.Float64("rps", cfg.RateLimitRPS),
-		slog.Float64("burst", cfg.RateLimitBurst))
+		slog.Float64("burst", cfg.RateLimitBurst),
+		slog.Bool("trust_proxy", cfg.TrustProxy))
 
 	if cfg.AuthToken == "" {
 		logger.Warn("auth disabled", slog.String("reason", "PROJECT_BRAIN_AUTH_TOKEN unset"))
