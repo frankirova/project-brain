@@ -2,8 +2,7 @@ package telegram
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -36,16 +35,30 @@ func (s *telegramSender) SendMessage(ctx context.Context, chatID int64, text str
 type Handler struct {
 	service *app.IngestTextService
 	sender  Sender
+	logger  *slog.Logger
 }
 
 // NewHandler creates a Handler that sends responses via the given bot.
-func NewHandler(svc *app.IngestTextService, b *bot.Bot) *Handler {
-	return &Handler{service: svc, sender: &telegramSender{b: b}}
+// If b is nil, the handler is in a "no-sender" state and SetBot must be
+// called before it can respond. The logger falls back to slog.Default()
+// when nil.
+func NewHandler(svc *app.IngestTextService, b *bot.Bot, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	h := &Handler{service: svc, logger: logger}
+	if b != nil {
+		h.sender = &telegramSender{b: b}
+	}
+	return h
 }
 
 // newHandlerWithSender creates a Handler with an injected Sender (for testing).
-func newHandlerWithSender(svc *app.IngestTextService, sender Sender) *Handler {
-	return &Handler{service: svc, sender: sender}
+func newHandlerWithSender(svc *app.IngestTextService, sender Sender, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Handler{service: svc, sender: sender, logger: logger}
 }
 
 // SetBot configures the handler to send messages via the given bot.
@@ -58,6 +71,25 @@ func (h *Handler) SetBot(b *bot.Bot) {
 // Returns nil for commands (/start, /help) or on successful ingestion.
 // Returns error only for unexpected failures (logged, not sent to user).
 func (h *Handler) ProcessUpdate(ctx context.Context, update *models.Update) error {
+	if update == nil {
+		return nil
+	}
+
+	// Inline Keyboard callbacks (Fase 3 prep). Today this is a stub that
+	// logs the callback and acks; the real handler ships with the
+	// validation workflow change.
+	if update.CallbackQuery != nil {
+		cb := update.CallbackQuery
+		h.logger.Info("telegram callback received",
+			slog.String("callback_id", cb.ID),
+			slog.String("data", cb.Data),
+		)
+		if h.sender != nil && cb.Message.Message != nil {
+			return h.sender.SendMessage(ctx, cb.Message.Message.Chat.ID, "OK")
+		}
+		return nil
+	}
+
 	if update.Message == nil {
 		return nil
 	}
@@ -109,9 +141,17 @@ func (h *Handler) handleMessage(ctx context.Context, update *models.Update) erro
 
 	result, err := h.service.Ingest(ctx, req)
 	if err != nil {
-		log.Printf("telegram: ingest error chat_id=%d message_id=%s: %v", chatID, messageID, err)
+		h.logger.Error("telegram ingest error",
+			slog.Int64("chat_id", chatID),
+			slog.String("message_id", messageID),
+			slog.String("error", err.Error()))
 		return h.sender.SendMessage(ctx, chatID, "Sorry, something went wrong processing your message.")
 	}
+
+	h.logger.Info("telegram message ingested",
+		slog.Int64("chat_id", chatID),
+		slog.String("message_id", messageID),
+		slog.Bool("duplicate", result.Duplicate))
 
 	if result.Duplicate {
 		return h.sender.SendMessage(ctx, chatID, "Duplicate")
@@ -125,7 +165,7 @@ func (h *Handler) handleMessage(ctx context.Context, update *models.Update) erro
 func (h *Handler) DefaultHandler() bot.HandlerFunc {
 	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
 		if err := h.ProcessUpdate(ctx, update); err != nil {
-			fmt.Fprintf(log.Writer(), "telegram: unhandled error: %v\n", err)
+			h.logger.Error("telegram unhandled error", slog.String("error", err.Error()))
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -94,13 +95,16 @@ func main() {
 			slog.String("environment", cfg.Environment))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("http server failed", slog.String("error", err.Error()))
-			os.Exit(1)
+			// Trigger the shutdown path instead of os.Exit — the
+			// deferred dbCloser() needs to run.
+			cancel()
 		}
 	}()
 
 	// Telegram bot: start polling only if token is configured.
+	var botWG sync.WaitGroup
 	if cfg.TelegramBotToken != "" {
-		tgHandler := telegram.NewHandler(svc, nil)
+		tgHandler := telegram.NewHandler(svc, nil, logger)
 		b, err := tgbot.New(cfg.TelegramBotToken,
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),
 		)
@@ -108,9 +112,12 @@ func main() {
 			logger.Error("telegram bot init", slog.String("error", err.Error()))
 		} else {
 			tgHandler.SetBot(b)
+			botWG.Add(1)
 			go func() {
+				defer botWG.Done()
 				logger.Info("telegram bot starting", slog.String("mode", "polling"))
 				b.Start(ctx) // blocks until ctx is cancelled
+				logger.Info("telegram bot stopped")
 			}()
 		}
 	} else {
@@ -127,6 +134,17 @@ func main() {
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("http shutdown", slog.String("error", err.Error()))
+	}
+
+	// Wait for the Telegram polling goroutine to exit. b.Start blocks
+	// until ctx is cancelled, so this should be near-instant.
+	botDone := make(chan struct{})
+	go func() { botWG.Wait(); close(botDone) }()
+	select {
+	case <-botDone:
+		logger.Info("telegram bot goroutine joined")
+	case <-time.After(cfg.ShutdownTimeout()):
+		logger.Warn("telegram bot goroutine did not exit before shutdown timeout")
 	}
 
 	dbCloser()
