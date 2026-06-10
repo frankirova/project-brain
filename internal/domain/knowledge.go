@@ -10,13 +10,31 @@ type Metadata map[string]any
 
 const (
 	SourceTypeText = "text"
-
 	KnowledgeObjectTypeDocument = "document"
-	KnowledgeObjectStatusActive = "active"
 
-	AuditActionKnowledgeIngested = "knowledge.ingested"
-	AuditTargetKnowledgeObject   = "knowledge_object"
+	// KnowledgeObjectStatus is the lifecycle of a knowledge object.
+	// Mirrors the CHECK constraint on knowledge_objects.status
+	// (migrations/0005_lifecycle_and_audit_richness.sql).
+	KnowledgeObjectStatusActive     = "active"     // historical default; equivalent to "validated but not formally reviewed"
+	KnowledgeObjectStatusProposed   = "proposed"   // recently ingested, awaiting human validation
+	KnowledgeObjectStatusDebating   = "debating"   // a human is reviewing / questioning
+	KnowledgeObjectStatusValidated  = "validated"  // a human explicitly approved
+	KnowledgeObjectStatusDeprecated = "deprecated" // superseded or invalidated
 )
+
+var validKnowledgeObjectStatuses = map[string]bool{
+	KnowledgeObjectStatusActive:     true,
+	KnowledgeObjectStatusProposed:   true,
+	KnowledgeObjectStatusDebating:   true,
+	KnowledgeObjectStatusValidated:  true,
+	KnowledgeObjectStatusDeprecated: true,
+}
+
+// ValidateKnowledgeObjectStatus returns true if status is one of the
+// five allowed lifecycle values.
+func ValidateKnowledgeObjectStatus(status string) bool {
+	return validKnowledgeObjectStatuses[status]
+}
 
 type Source struct {
 	ID          uuid.UUID
@@ -66,9 +84,30 @@ type AuditEvent struct {
 	Action      string
 	TargetType  string
 	TargetID    uuid.UUID
+	Before      Metadata
 	After       Metadata
+	Reason      string
+	RequestID   *uuid.UUID
+	Metadata    Metadata
 	CreatedAt   time.Time
 }
+
+// AuditAction enumerates the recognized audit event actions. The DB
+// does not enforce this list yet (forward-compatible), but the app
+// layer should use these constants for consistency.
+const (
+	AuditActionKnowledgeIngested         = "knowledge.ingested"
+	AuditActionKnowledgeDuplicateDetected = "knowledge.duplicate_detected"
+	AuditActionKnowledgeStatusChanged    = "knowledge.status_changed"
+	AuditActionRelationCreated           = "relation.created"
+)
+
+// AuditTargetType enumerates the recognized audit target types.
+const (
+	AuditTargetKnowledgeObject = "knowledge_object"
+	AuditTargetRelation        = "relation"
+	AuditTargetRawInput        = "raw_input"
+)
 
 // RelationType is a string enum for the 14 allowed relation types.
 type RelationType string
