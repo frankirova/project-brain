@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/frankirova/project-brain/internal/app"
@@ -81,7 +82,14 @@ func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		// Mid-write encode failure produces a truncated response
+		// the client cannot parse. Log so an operator can spot it
+		// instead of silently sending half a JSON document.
+		slog.Default().Error("response encode failed",
+			slog.String("handler", "ingest_text"),
+			slog.String("error", err.Error()))
+	}
 }
 
 // HealthHandler handles GET /v1/health requests.
@@ -91,16 +99,25 @@ type HealthHandler struct{}
 func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		slog.Default().Error("response encode failed",
+			slog.String("handler", "health"),
+			slog.String("error", err.Error()))
+	}
 }
 
 // writeError is a helper to write error responses.
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(errorResponse{
+	if err := json.NewEncoder(w).Encode(errorResponse{
 		Error:   http.StatusText(status),
 		Message: message,
 		Code:    code,
-	})
+	}); err != nil {
+		slog.Default().Error("response encode failed",
+			slog.String("handler", "error"),
+			slog.Int("status", status),
+			slog.String("error", err.Error()))
+	}
 }
