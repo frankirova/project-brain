@@ -22,12 +22,13 @@ El server queda en `http://localhost:8050`. Postgres en `localhost:5433`.
 ### Endpoints HTTP
 
 ```sh
-# Health check
+# Health check (no requiere auth)
 curl http://localhost:8050/v1/health
 
-# Ingestar texto
+# Ingestar texto (requiere bearer token si PROJECT_BRAIN_AUTH_TOKEN está set)
 curl -X POST http://localhost:8050/v1/ingest-text \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $PROJECT_BRAIN_AUTH_TOKEN" \
   -d '{
     "workspace_id": "mi-workspace",
     "content": "Project Brain es una plataforma de conocimiento",
@@ -67,6 +68,9 @@ PROJECT_BRAIN_TEST_DATABASE_DSN="postgres://postgres:postgres@127.0.0.1:5433/pro
 | `PROJECT_BRAIN_API_PORT` | `8050` | Puerto TCP del server |
 | `PROJECT_BRAIN_DATABASE_DSN` | empty | DSN de Postgres. Si está vacío, usa in-memory fake |
 | `PROJECT_BRAIN_TELEGRAM_BOT_TOKEN` | empty | Token del bot. Si está vacío, el bot no arranca |
+| `PROJECT_BRAIN_AUTH_TOKEN` | empty | Bearer token para `/v1/ingest-text`. Si está vacío, auth desactivada |
+| `PROJECT_BRAIN_RATE_LIMIT_RPS` | `5` | Requests por segundo por IP |
+| `PROJECT_BRAIN_RATE_LIMIT_BURST` | `10` | Burst máximo por IP |
 | `PROJECT_BRAIN_SHUTDOWN_SECS` | `5` | Grace period para shutdown |
 | `PROJECT_BRAIN_TEST_DATABASE_DSN` | empty | Habilita integration tests de Postgres |
 
