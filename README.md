@@ -77,13 +77,16 @@ PROJECT_BRAIN_TEST_DATABASE_DSN="postgres://postgres:postgres@127.0.0.1:5433/pro
 
 | Variable | Default | Descripción |
 |---|---:|---|
-| `PROJECT_BRAIN_ENV` | `development` | Label del entorno de runtime |
+| `PROJECT_BRAIN_ENV` | `development` | Label del entorno de runtime. Si es `production` y no hay DSN, el server se niega a arrancar. |
 | `PROJECT_BRAIN_API_PORT` | `8050` | Puerto TCP del server |
 | `PROJECT_BRAIN_DATABASE_DSN` | empty | DSN de Postgres. Si está vacío, usa in-memory fake |
 | `PROJECT_BRAIN_TELEGRAM_BOT_TOKEN` | empty | Token del bot. Si está vacío, el bot no arranca |
 | `PROJECT_BRAIN_AUTH_TOKEN` | empty | Bearer token para `/v1/ingest-text`. Si está vacío, auth desactivada |
-| `PROJECT_BRAIN_RATE_LIMIT_RPS` | `5` | Requests por segundo por IP |
-| `PROJECT_BRAIN_RATE_LIMIT_BURST` | `10` | Burst máximo por IP |
+| `PROJECT_BRAIN_RATE_LIMIT_RPS` | `5` | Requests por segundo por IP (max 1000) |
+| `PROJECT_BRAIN_RATE_LIMIT_BURST` | `10` | Burst máximo por IP (max 10000) |
+| `PROJECT_BRAIN_TRUST_PROXY` | `false` | Si `true`, honra `X-Forwarded-For`. Default: solo usa `RemoteAddr` para evitar spoofing |
+| `PROJECT_BRAIN_INGEST_MAX_BYTES` | `1 MiB` | Tamaño máximo del body en `/v1/ingest-text` |
+| `PROJECT_BRAIN_LOG_LEVEL` | `info` (dev: `debug`) | Nivel de log: debug, info, warn, error |
 | `PROJECT_BRAIN_SHUTDOWN_SECS` | `5` | Grace period para shutdown |
 | `PROJECT_BRAIN_TEST_DATABASE_DSN` | empty | Habilita integration tests de Postgres |
 
