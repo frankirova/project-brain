@@ -50,6 +50,14 @@ func main() {
 	} else {
 		uow = newInMemoryUOW()
 		dbCloser = func() {}
+		// In-memory mode is useful for local dev and smoke tests, but
+		// running it in production silently loses every write on restart.
+		// Refuse to start in production with no DSN.
+		if cfg.Environment == "production" {
+			logger.Error("in-memory uow refused in production",
+				slog.String("reason", "PROJECT_BRAIN_DATABASE_DSN unset"))
+			os.Exit(1)
+		}
 		logger.Warn("running with in-memory uow", slog.String("reason", "PROJECT_BRAIN_DATABASE_DSN unset"))
 	}
 
