@@ -13,6 +13,7 @@ import (
 	"github.com/frankirova/project-brain/internal/config"
 	"github.com/frankirova/project-brain/internal/domain"
 	"github.com/frankirova/project-brain/internal/httpapi"
+	"github.com/frankirova/project-brain/internal/httpapi/auth"
 	"github.com/frankirova/project-brain/internal/httpapi/ratelimit"
 	"github.com/frankirova/project-brain/internal/postgres"
 	"github.com/frankirova/project-brain/internal/telegram"
@@ -62,9 +63,17 @@ func main() {
 		slog.Float64("rps", cfg.RateLimitRPS),
 		slog.Float64("burst", cfg.RateLimitBurst))
 
+	if cfg.AuthToken == "" {
+		logger.Warn("auth disabled", slog.String("reason", "PROJECT_BRAIN_AUTH_TOKEN unset"))
+	} else {
+		logger.Info("auth enabled", slog.String("scheme", "bearer"))
+	}
+
+	// Order: auth first, then rate limit, then handler. Rate limit runs
+	// after auth so unauthenticated floods don't consume buckets.
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: limiter.Middleware(mux),
+		Handler: auth.Middleware(cfg.AuthToken)(limiter.Middleware(mux)),
 	}
 
 	go func() {
