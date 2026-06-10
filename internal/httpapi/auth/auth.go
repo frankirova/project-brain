@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -46,10 +47,24 @@ func Middleware(expectedToken string) func(http.Handler) http.Handler {
 	}
 }
 
+// errorBody is the JSON wire shape for 401 responses. Built with
+// json.Marshal so user-supplied strings (header values) cannot
+// inject JSON-breaking characters.
+type errorBody struct {
+	Error   string `json:"error"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 func unauthorized(w http.ResponseWriter, msg string) {
+	body, _ := json.Marshal(errorBody{
+		Error:   "Unauthorized",
+		Code:    "AUTH_REQUIRED",
+		Message: msg,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"error":"Unauthorized","code":"AUTH_REQUIRED","message":"` + msg + `"}`))
+	_, _ = w.Write(body)
 }
 
 // constantTimeEqual compares two strings in constant time to avoid
