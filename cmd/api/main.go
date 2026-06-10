@@ -79,9 +79,10 @@ func main() {
 	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
 		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
 		protectedMux.Handle("GET /v1/search", httpapi.NewSearchHandler(ftsRetriever))
-		logger.Info("search endpoint enabled", slog.String("retriever", "fts"))
+		protectedMux.Handle("GET /v1/objects/{id}", httpapi.NewObjectHandler(ftsRetriever))
+		logger.Info("search + object endpoints enabled", slog.String("retriever", "fts"))
 	} else {
-		logger.Info("search endpoint disabled", slog.String("reason", "no postgres backend"))
+		logger.Info("search + object endpoints disabled", slog.String("reason", "no postgres backend"))
 	}
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
