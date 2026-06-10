@@ -63,7 +63,7 @@ func main() {
 	}
 
 	svc := app.NewIngestTextService(uow)
-	handler := httpapi.NewIngestTextHandler(svc)
+	handler := httpapi.NewIngestTextHandler(svc, cfg.IngestMaxBytes)
 
 	// Public mux: only the health probe. No auth, no rate limit — health
 	// must work even when the service is being abused or auth is broken.

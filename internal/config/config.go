@@ -26,6 +26,7 @@ type Config struct {
 	RateLimitRPS      float64
 	RateLimitBurst    float64
 	TrustProxy        bool
+	IngestMaxBytes    int64
 }
 
 // ShutdownTimeout returns the configured shutdown grace period.
@@ -50,6 +51,7 @@ func Load() (Config, error) {
 		RateLimitRPS:     floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_RPS", 5),
 		RateLimitBurst:   floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_BURST", 10),
 		TrustProxy:       boolEnvOrDefault("PROJECT_BRAIN_TRUST_PROXY", false),
+		IngestMaxBytes:   int64EnvOrDefault("PROJECT_BRAIN_INGEST_MAX_BYTES", 1<<20),
 	}
 
 	if err := validatePort(cfg.Port); err != nil {
@@ -85,6 +87,15 @@ func validatePort(port string) error {
 func intEnvOrDefault(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+func int64EnvOrDefault(key string, fallback int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			return n
 		}
 	}

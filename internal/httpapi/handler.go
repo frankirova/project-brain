@@ -15,12 +15,18 @@ const maxBodyBytes = 1 << 20 // 1 MiB
 
 // IngestTextHandler handles POST /v1/ingest-text requests.
 type IngestTextHandler struct {
-	service *app.IngestTextService
+	service     *app.IngestTextService
+	maxBodySize int64
 }
 
 // NewIngestTextHandler creates a new IngestTextHandler.
-func NewIngestTextHandler(svc *app.IngestTextService) *IngestTextHandler {
-	return &IngestTextHandler{service: svc}
+// maxBodySize caps the request body in bytes; 0 means use the
+// default (1 MiB).
+func NewIngestTextHandler(svc *app.IngestTextService, maxBodySize int64) *IngestTextHandler {
+	if maxBodySize <= 0 {
+		maxBodySize = 1 << 20
+	}
+	return &IngestTextHandler{service: svc, maxBodySize: maxBodySize}
 }
 
 // ingestTextRequest is the JSON wire type for incoming requests.
@@ -40,7 +46,7 @@ type errorResponse struct {
 
 // ServeHTTP decodes the request, calls the service, and writes the response.
 func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
 
 	var req ingestTextRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -49,7 +55,7 @@ func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// the error message.
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request body exceeds 1 MiB limit")
+			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request body exceeds size limit")
 			return
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, &json.SyntaxError{}) || errors.Is(err, &json.UnmarshalTypeError{}) {

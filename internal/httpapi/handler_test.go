@@ -115,7 +115,7 @@ func (r *fakeAuditRepo) Create(_ context.Context, event domain.AuditEvent) error
 func TestIngestTextHandler_Success(t *testing.T) {
 	uow := newFakeUOW()
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	body := ingestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -174,7 +174,7 @@ func TestIngestTextHandler_Success(t *testing.T) {
 func TestIngestTextHandler_ValidationError(t *testing.T) {
 	uow := newFakeUOW()
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	body := ingestTextRequest{
 		WorkspaceID: "",
@@ -210,7 +210,7 @@ func TestIngestTextHandler_NotFoundError(t *testing.T) {
 	uow := newFakeUOW()
 	uow.repos.source.err = app.ErrNotFound
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	body := ingestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -245,7 +245,7 @@ func TestIngestTextHandler_InternalError(t *testing.T) {
 	uow := newFakeUOW()
 	uow.repos.source.err = errors.New("database connection lost")
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	body := ingestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -290,7 +290,7 @@ func TestIngestTextHandler_Duplicate(t *testing.T) {
 	uow := newFakeUOW()
 	uow.repos.source.existingResult = existing
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	body := ingestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -352,7 +352,7 @@ func TestHealthHandler(t *testing.T) {
 func TestIngestTextHandler_MalformedJSON(t *testing.T) {
 	uow := newFakeUOW()
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/ingest-text", bytes.NewReader([]byte("invalid json")))
 	req.Header.Set("Content-Type", "application/json")
@@ -377,7 +377,7 @@ func TestIngestTextHandler_MalformedJSON(t *testing.T) {
 func TestIngestTextHandler_RawJSONWireContract(t *testing.T) {
 	uow := newFakeUOW()
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	// Raw JSON payload — validates actual snake_case wire contract, not Go struct tags.
 	rawJSON := `{
@@ -444,7 +444,7 @@ func TestIngestTextHandler_RawJSONWireContract(t *testing.T) {
 func TestIngestTextHandler_BodyTooLarge(t *testing.T) {
 	uow := newFakeUOW()
 	svc := app.NewIngestTextService(uow)
-	handler := NewIngestTextHandler(svc)
+	handler := NewIngestTextHandler(svc, 0)
 
 	// Build a payload that exceeds maxBodyBytes (1 MiB).
 	bigContent := make([]byte, maxBodyBytes+1)
