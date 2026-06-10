@@ -89,6 +89,7 @@ func intEnvOrDefault(key string, fallback int) int {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
+		fmt.Fprintf(os.Stderr, "warning: %s=%q is not a valid positive integer, using default %d\n", key, v, fallback)
 	}
 	return fallback
 }
