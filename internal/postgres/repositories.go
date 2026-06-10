@@ -44,16 +44,27 @@ type sourceRepository struct {
 }
 
 func (r *sourceRepository) FindIngestionResultByIdentityKey(ctx context.Context, workspaceID string, identityKey string) (domain.IngestTextResult, error) {
+	// A source can be linked to many knowledge_objects (one source may
+	// produce several derived objects/chunks in future phases). We pick
+	// one canonical object per source by sorting on object_id. The
+	// audit_event for that object is then the single matching ingestion
+	// event. Without picking object_id first, the LIMIT 1 would be
+	// non-deterministic across joins.
 	const query = `
 SELECT s.id, os.object_id, COALESCE(ae.id, '00000000-0000-0000-0000-000000000000'::uuid), s.checksum, s.identity_key
-FROM sources s
+FROM (
+	SELECT id, checksum, identity_key
+	FROM sources
+	WHERE workspace_id = $1 AND identity_key = $2
+	ORDER BY id
+	LIMIT 1
+) s
 JOIN object_sources os ON os.source_id = s.id
 LEFT JOIN audit_events ae
   ON ae.target_type = 'knowledge_object'
  AND ae.target_id = os.object_id
  AND ae.action = 'knowledge.ingested'
-WHERE s.workspace_id = $1 AND s.identity_key = $2
-ORDER BY ae.created_at DESC NULLS LAST
+ORDER BY os.object_id
 LIMIT 1`
 
 	var result domain.IngestTextResult
