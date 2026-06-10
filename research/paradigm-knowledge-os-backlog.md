@@ -117,4 +117,4 @@ Origen: `openspec/changes/paradigm-knowledge-os/{exploration.md, proposal.md, de
 - [ ] 2.3 `agents-shared-brain` — refactor de frontera
 - [ ] 2.4 `relations-bidirectional-and-freshness` — plan de columnas
 - [ ] 3. Brechas de `exploration.md` — todas mapeadas a un change
-- [ ] 4. Quick wins ejecutados (#11, #13, #15)
+- [ ] 4. Quick wins ejecutados (#11, #13, #15) — #11 y #13 listos (analizados), #15 en análisis
