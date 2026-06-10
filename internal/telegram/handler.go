@@ -39,18 +39,14 @@ type Handler struct {
 }
 
 // NewHandler creates a Handler that sends responses via the given bot.
-// If b is nil, the handler is in a "no-sender" state and SetBot must be
-// called before it can respond. The logger falls back to slog.Default()
+// b may be nil — the bot will be wired lazily by DefaultHandler when
+// the first update arrives. The logger falls back to slog.Default()
 // when nil.
 func NewHandler(svc *app.IngestTextService, b *bot.Bot, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &Handler{service: svc, logger: logger}
-	if b != nil {
-		h.sender = &telegramSender{b: b}
-	}
-	return h
+	return &Handler{service: svc, sender: &telegramSender{b: b}, logger: logger}
 }
 
 // newHandlerWithSender creates a Handler with an injected Sender (for testing).
@@ -59,12 +55,6 @@ func newHandlerWithSender(svc *app.IngestTextService, sender Sender, logger *slo
 		logger = slog.Default()
 	}
 	return &Handler{service: svc, sender: sender, logger: logger}
-}
-
-// SetBot configures the handler to send messages via the given bot.
-// Call this after bot.New when the bot instance becomes available.
-func (h *Handler) SetBot(b *bot.Bot) {
-	h.sender = &telegramSender{b: b}
 }
 
 // ProcessUpdate handles a single Telegram update.
@@ -84,7 +74,7 @@ func (h *Handler) ProcessUpdate(ctx context.Context, update *models.Update) erro
 			slog.String("callback_id", cb.ID),
 			slog.String("data", cb.Data),
 		)
-		if h.sender != nil && cb.Message.Message != nil {
+		if cb.Message.Message != nil {
 			return h.sender.SendMessage(ctx, cb.Message.Message.Chat.ID, "OK")
 		}
 		return nil
@@ -162,8 +152,17 @@ func (h *Handler) handleMessage(ctx context.Context, update *models.Update) erro
 
 // DefaultHandler returns a bot.HandlerFunc suitable for bot.New / WithDefaultHandler.
 // The returned function delegates to this Handler's ProcessUpdate.
+//
+// The bot argument is passed by the Telegram library at callback time.
+// We use it to lazily wire the sender if NewHandler was called with
+// a nil bot (which happens in main.go because the bot cannot be
+// created without a handler that uses WithDefaultHandler).
 func (h *Handler) DefaultHandler() bot.HandlerFunc {
 	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
+		// Lazy init: if sender has a nil bot, install the real one now.
+		if ts, ok := h.sender.(*telegramSender); ok && ts.b == nil {
+			ts.b = b
+		}
 		if err := h.ProcessUpdate(ctx, update); err != nil {
 			h.logger.Error("telegram unhandled error", slog.String("error", err.Error()))
 		}

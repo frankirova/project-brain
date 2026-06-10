@@ -122,7 +122,6 @@ func main() {
 		if err != nil {
 			logger.Error("telegram bot init", slog.String("error", err.Error()))
 		} else {
-			tgHandler.SetBot(b)
 			botWG.Add(1)
 			go func() {
 				defer botWG.Done()
