@@ -11,15 +11,14 @@ import (
 	"time"
 
 	"github.com/frankirova/project-brain/internal/app"
+	"github.com/frankirova/project-brain/internal/app/inmem"
 	"github.com/frankirova/project-brain/internal/config"
-	"github.com/frankirova/project-brain/internal/domain"
 	"github.com/frankirova/project-brain/internal/httpapi"
 	"github.com/frankirova/project-brain/internal/httpapi/auth"
 	"github.com/frankirova/project-brain/internal/httpapi/ratelimit"
 	"github.com/frankirova/project-brain/internal/postgres"
 	"github.com/frankirova/project-brain/internal/telegram"
 	tgbot "github.com/go-telegram/bot"
-	"github.com/google/uuid"
 )
 
 func main() {
@@ -48,7 +47,7 @@ func main() {
 		dbCloser = db.Close
 		logger.Info("postgres connection opened")
 	} else {
-		uow = newInMemoryUOW()
+		uow = inmem.NewUOW()
 		dbCloser = func() {}
 		// In-memory mode is useful for local dev and smoke tests, but
 		// running it in production silently loses every write on restart.
@@ -177,56 +176,4 @@ func newLogger(env string) *slog.Logger {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 	return slog.New(handler)
-}
-
-// inMemoryUOW is a minimal in-memory fake for development without PostgreSQL.
-type inMemoryUOW struct{}
-
-func newInMemoryUOW() *inMemoryUOW {
-	return &inMemoryUOW{}
-}
-
-func (u *inMemoryUOW) WithinIngestionTx(ctx context.Context, fn func(context.Context, app.IngestionRepositories) error) error {
-	// For in-memory mode, provide no-op repositories.
-	repos := &noopRepos{}
-	return fn(ctx, repos)
-}
-
-type noopRepos struct{}
-
-func (r *noopRepos) Sources() app.SourceRepository                   { return &noopSourceRepo{} }
-func (r *noopRepos) KnowledgeObjects() app.KnowledgeObjectRepository { return &noopObjectRepo{} }
-func (r *noopRepos) ObjectSources() app.ObjectSourceRepository       { return &noopLinkRepo{} }
-func (r *noopRepos) AuditEvents() app.AuditEventRepository           { return &noopAuditRepo{} }
-
-type noopSourceRepo struct{}
-
-func (r *noopSourceRepo) FindIngestionResultByIdentityKey(_ context.Context, _ string, _ string) (domain.IngestTextResult, error) {
-	return domain.IngestTextResult{}, app.ErrNotFound
-}
-
-func (r *noopSourceRepo) Create(_ context.Context, _ domain.Source) error {
-	return nil
-}
-
-type noopObjectRepo struct{}
-
-func (r *noopObjectRepo) Create(_ context.Context, _ domain.KnowledgeObject) error {
-	return nil
-}
-
-func (r *noopObjectRepo) UpdateStatus(_ context.Context, _ string, _ uuid.UUID, _ string) error {
-	return nil
-}
-
-type noopLinkRepo struct{}
-
-func (r *noopLinkRepo) Create(_ context.Context, _ domain.ObjectSource) error {
-	return nil
-}
-
-type noopAuditRepo struct{}
-
-func (r *noopAuditRepo) Create(_ context.Context, _ domain.AuditEvent) error {
-	return nil
 }
