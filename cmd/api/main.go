@@ -54,9 +54,14 @@ func main() {
 	svc := app.NewIngestTextService(uow)
 	handler := httpapi.NewIngestTextHandler(svc)
 
-	mux := http.NewServeMux()
-	mux.Handle("POST /v1/ingest-text", handler)
-	mux.Handle("GET /v1/health", &httpapi.HealthHandler{})
+	// Public mux: only the health probe. No auth, no rate limit — health
+	// must work even when the service is being abused or auth is broken.
+	publicMux := http.NewServeMux()
+	publicMux.Handle("GET /v1/health", &httpapi.HealthHandler{})
+
+	// Protected mux: ingest endpoint goes through auth then rate limit.
+	protectedMux := http.NewServeMux()
+	protectedMux.Handle("POST /v1/ingest-text", handler)
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
 	logger.Info("rate limit enabled",
@@ -69,11 +74,17 @@ func main() {
 		logger.Info("auth enabled", slog.String("scheme", "bearer"))
 	}
 
+	// Compose: top-level mux routes /v1/health to public, everything else
+	// to the protected chain (auth -> rate limit -> handler).
+	rootMux := http.NewServeMux()
+	rootMux.Handle("GET /v1/health", publicMux)
+	rootMux.Handle("/", auth.Middleware(cfg.AuthToken)(limiter.Middleware(protectedMux)))
+
 	// Order: auth first, then rate limit, then handler. Rate limit runs
 	// after auth so unauthenticated floods don't consume buckets.
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: auth.Middleware(cfg.AuthToken)(limiter.Middleware(mux)),
+		Handler: rootMux,
 	}
 
 	go func() {
