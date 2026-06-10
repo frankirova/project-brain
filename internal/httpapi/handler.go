@@ -43,13 +43,16 @@ func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req ingestTextRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, &json.SyntaxError{}) || errors.Is(err, &json.UnmarshalTypeError{}) {
-			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body")
+		// MaxBytesReader returns *http.MaxBytesError when the limit is
+		// exceeded (Go 1.19+). Type-assert instead of string-matching
+		// the error message.
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request body exceeds 1 MiB limit")
 			return
 		}
-		// MaxBytesReader returns a generic error when the limit is exceeded.
-		if err.Error() == "http: request body too large" {
-			writeError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request body exceeds 1 MiB limit")
+		if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, &json.SyntaxError{}) || errors.Is(err, &json.UnmarshalTypeError{}) {
+			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body")
 			return
 		}
 		writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body")
