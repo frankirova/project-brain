@@ -18,7 +18,6 @@ type Limiter struct {
 	rate       float64 // tokens per second
 	burst      float64 // max tokens
 	idleTTL    time.Duration
-	lastSeen   map[string]time.Time
 	trustProxy bool
 }
 
@@ -32,11 +31,10 @@ type bucket struct {
 // inactive IP's bucket is retained before being garbage-collected.
 func New(rate, burst float64, idleTTL time.Duration) *Limiter {
 	l := &Limiter{
-		buckets:  make(map[string]*bucket),
-		rate:     rate,
-		burst:    burst,
-		idleTTL:  idleTTL,
-		lastSeen: make(map[string]time.Time),
+		buckets: make(map[string]*bucket),
+		rate:    rate,
+		burst:   burst,
+		idleTTL: idleTTL,
 	}
 	go l.gcLoop()
 	return l
@@ -57,10 +55,9 @@ func (l *Limiter) gcLoop() {
 	for range t.C {
 		l.mu.Lock()
 		now := time.Now()
-		for ip, last := range l.lastSeen {
-			if now.Sub(last) > l.idleTTL {
+		for ip, b := range l.buckets {
+			if now.Sub(b.last) > l.idleTTL {
 				delete(l.buckets, ip)
-				delete(l.lastSeen, ip)
 			}
 		}
 		l.mu.Unlock()
@@ -86,7 +83,6 @@ func (l *Limiter) allow(ip string) bool {
 		b.tokens = l.burst
 	}
 	b.last = now
-	l.lastSeen[ip] = now
 
 	if b.tokens < 1 {
 		return false
