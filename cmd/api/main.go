@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -160,12 +162,27 @@ func main() {
 	logger.Info("project-brain api stopped")
 }
 
-// newLogger returns a slog.Logger configured per environment. Production
-// uses JSON for log aggregation; development uses text for readability.
+// newLogger returns a slog.Logger configured per environment and
+// PROJECT_BRAIN_LOG_LEVEL override. Production logs are JSON for
+// aggregation; development logs are text for readability.
 func newLogger(env string) *slog.Logger {
 	level := slog.LevelInfo
 	if env == "development" {
 		level = slog.LevelDebug
+	}
+	if v := os.Getenv("PROJECT_BRAIN_LOG_LEVEL"); v != "" {
+		switch strings.ToLower(v) {
+		case "debug":
+			level = slog.LevelDebug
+		case "info":
+			level = slog.LevelInfo
+		case "warn", "warning":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		default:
+			fmt.Fprintf(os.Stderr, "unknown PROJECT_BRAIN_LOG_LEVEL=%q, falling back to default\n", v)
+		}
 	}
 	opts := &slog.HandlerOptions{Level: level}
 
