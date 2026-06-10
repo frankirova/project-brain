@@ -14,6 +14,16 @@ type IngestionUnitOfWork interface {
 	WithinIngestionTx(ctx context.Context, fn func(context.Context, IngestionRepositories) error) error
 }
 
+// IngestionRepositories bundles the four repository interfaces that
+// participate in a single ingestion transaction: Source, KnowledgeObject,
+// ObjectSource, and AuditEvent.
+//
+// Asymmetry note: RelationRepository is intentionally NOT part of this
+// interface. Relations are created independently of the ingest use
+// case — a separate change added them as a standalone repo, accessible
+// via DB.Relations(). Keeping them out of the ingestion UoW prevents
+// accidental coupling. See ROADMAP.md and the knowledge-relations
+// change archive for the rationale.
 type IngestionRepositories interface {
 	Sources() SourceRepository
 	KnowledgeObjects() KnowledgeObjectRepository
