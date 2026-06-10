@@ -72,7 +72,7 @@ func newTestHandler(sender *fakeSender, sourceRepo *fakeSourceRepo) *Handler {
 	uow := &fakeIngestionUOW{
 		repos: &testRepos{source: sourceRepo},
 	}
-	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now)
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
 	return newHandlerWithSender(svc, sender)
 }
 
@@ -187,7 +187,7 @@ func TestServiceError(t *testing.T) {
 	sender := &fakeSender{}
 	// Create a UoW that returns an error inside the transaction
 	uow := &errorUOW{err: errors.New("database connection lost")}
-	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now)
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
 	handler := newHandlerWithSender(svc, sender)
 
 	err := handler.ProcessUpdate(context.Background(), testUpdate("trigger error"))

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -20,22 +21,30 @@ type IDGenerator func() uuid.UUID
 type Clock func() time.Time
 
 type IngestTextService struct {
-	uow IngestionUnitOfWork
-	ids IDGenerator
-	now Clock
+	uow    IngestionUnitOfWork
+	ids    IDGenerator
+	now    Clock
+	logger *slog.Logger
 }
 
 func NewIngestTextService(uow IngestionUnitOfWork) *IngestTextService {
-	return NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now)
+	return NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, slog.Default())
 }
 
-func NewIngestTextServiceWithDependencies(uow IngestionUnitOfWork, ids IDGenerator, now Clock) *IngestTextService {
-	return &IngestTextService{uow: uow, ids: ids, now: now}
+func NewIngestTextServiceWithDependencies(uow IngestionUnitOfWork, ids IDGenerator, now Clock, logger *slog.Logger) *IngestTextService {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &IngestTextService{uow: uow, ids: ids, now: now, logger: logger}
 }
 
 func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextRequest) (domain.IngestTextResult, error) {
+	start := s.now()
 	prepared, err := prepareIngestText(req)
 	if err != nil {
+		s.logger.Debug("ingest validation failed",
+			slog.String("workspace_id", strings.TrimSpace(req.WorkspaceID)),
+			slog.String("error", err.Error()))
 		return domain.IngestTextResult{}, err
 	}
 
@@ -129,8 +138,20 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 		return nil
 	})
 	if err != nil {
+		s.logger.Error("ingest transaction failed",
+			slog.String("workspace_id", prepared.workspaceID),
+			slog.String("error", err.Error()),
+			slog.Duration("elapsed", s.now().Sub(start)))
 		return domain.IngestTextResult{}, err
 	}
+
+	s.logger.Info("ingest complete",
+		slog.String("workspace_id", prepared.workspaceID),
+		slog.Int("content_bytes", len(prepared.content)),
+		slog.Bool("duplicate", result.Duplicate),
+		slog.String("source_id", result.SourceID.String()),
+		slog.String("object_id", result.ObjectID.String()),
+		slog.Duration("elapsed", s.now().Sub(start)))
 
 	return result, nil
 }
@@ -171,6 +192,8 @@ func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error)
 	objectStatus := strings.TrimSpace(req.Object.Status)
 	if objectStatus == "" {
 		objectStatus = domain.KnowledgeObjectStatusActive
+	} else if !domain.ValidateKnowledgeObjectStatus(objectStatus) {
+		return preparedIngestText{}, fmt.Errorf("%w: object.status %q is not a valid lifecycle value", ErrValidation, objectStatus)
 	}
 
 	contentChecksum := checksum(content)

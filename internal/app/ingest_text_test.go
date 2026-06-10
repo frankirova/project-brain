@@ -18,7 +18,7 @@ func TestIngestCreatesCompleteAuditableRecords(t *testing.T) {
 	}
 	now := time.Date(2026, 6, 9, 10, 11, 12, 0, time.UTC)
 	uow := newFakeUOW()
-	service := NewIngestTextServiceWithDependencies(uow, ids.next, func() time.Time { return now })
+	service := NewIngestTextServiceWithDependencies(uow, ids.next, func() time.Time { return now }, nil)
 
 	result, err := service.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: " workspace-1 ",
@@ -76,7 +76,7 @@ func TestIngestCreatesCompleteAuditableRecords(t *testing.T) {
 
 func TestIngestRejectsWhitespaceWithoutWrites(t *testing.T) {
 	uow := newFakeUOW()
-	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
 
 	_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -100,7 +100,7 @@ func TestIngestReturnsDuplicateWithoutCreatingRecords(t *testing.T) {
 	}
 	uow := newFakeUOW()
 	uow.repos.source.existingResult = existing
-	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
 
 	result, err := service.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -134,7 +134,7 @@ func TestIngestDoesNotRequireDeferredExternalCapabilities(t *testing.T) {
 		uuid.MustParse("20000000-0000-0000-0000-000000000002"),
 		uuid.MustParse("20000000-0000-0000-0000-000000000003"),
 	}
-	service := NewIngestTextServiceWithDependencies(uow, ids.next, func() time.Time { return time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC) })
+	service := NewIngestTextServiceWithDependencies(uow, ids.next, func() time.Time { return time.Date(2026, 6, 9, 0, 0, 0, 0, time.UTC) }, nil)
 
 	_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -162,7 +162,7 @@ func TestIngestRollsBackWhenARequiredRecordFails(t *testing.T) {
 		uuid.MustParse("30000000-0000-0000-0000-000000000002"),
 		uuid.MustParse("30000000-0000-0000-0000-000000000003"),
 	}
-	service := NewIngestTextServiceWithDependencies(uow, ids.next, time.Now)
+	service := NewIngestTextServiceWithDependencies(uow, ids.next, time.Now, nil)
 
 	_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -217,7 +217,7 @@ func TestIngestPersistsNewMetadataFields(t *testing.T) {
 		uuid.MustParse("40000000-0000-0000-0000-000000000004"),
 	}
 	uow := newFakeUOW()
-	service := NewIngestTextServiceWithDependencies(uow, ids.next, time.Now)
+	service := NewIngestTextServiceWithDependencies(uow, ids.next, time.Now, nil)
 
 	_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: "workspace-1",
@@ -256,7 +256,7 @@ func TestIngestPersistsNewMetadataFields(t *testing.T) {
 
 func TestIngestDefaultsNilTagsToEmptySlice(t *testing.T) {
 	uow := newFakeUOW()
-	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
 
 	_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: "workspace-1",
