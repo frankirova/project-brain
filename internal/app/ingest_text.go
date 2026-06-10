@@ -16,6 +16,35 @@ import (
 
 var ErrValidation = errors.New("validation error")
 
+// FieldError carries the name and reason of a single validation
+// failure. Callers (e.g. Fase 3's Telegram validation UI) can extract
+// the field to highlight it in the response.
+type FieldError struct {
+	Field  string
+	Reason string
+}
+
+func (e *FieldError) Error() string {
+	return e.Field + ": " + e.Reason
+}
+
+// FieldErrorf returns a FieldError wrapped in ErrValidation. Callers
+// can errors.As to recover the FieldError and extract the structured
+// detail.
+func FieldErrorf(field, reason string) error {
+	return &validationError{Field: FieldError{Field: field, Reason: reason}}
+}
+
+type validationError struct {
+	Field FieldError
+}
+
+func (e *validationError) Error() string {
+	return e.Field.Error()
+}
+
+func (e *validationError) Unwrap() error { return ErrValidation }
+
 type IDGenerator func() uuid.UUID
 
 type Clock func() time.Time
@@ -173,12 +202,12 @@ type preparedIngestText struct {
 func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error) {
 	workspaceID := strings.ToLower(strings.TrimSpace(req.WorkspaceID))
 	if workspaceID == "" {
-		return preparedIngestText{}, fmt.Errorf("%w: workspace_id is required", ErrValidation)
+		return preparedIngestText{}, FieldErrorf("workspace_id", "is required")
 	}
 
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
-		return preparedIngestText{}, fmt.Errorf("%w: content is required", ErrValidation)
+		return preparedIngestText{}, FieldErrorf("content", "is required")
 	}
 
 	sourceType := strings.TrimSpace(req.Source.Type)
@@ -193,7 +222,7 @@ func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error)
 	if objectStatus == "" {
 		objectStatus = domain.KnowledgeObjectStatusActive
 	} else if !domain.ValidateKnowledgeObjectStatus(objectStatus) {
-		return preparedIngestText{}, fmt.Errorf("%w: object.status %q is not a valid lifecycle value", ErrValidation, objectStatus)
+		return preparedIngestText{}, FieldErrorf("object.status", fmt.Sprintf("is not a valid lifecycle value: %q", objectStatus))
 	}
 
 	contentChecksum := checksum(content)
