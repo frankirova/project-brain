@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/config"
 	"github.com/frankirova/project-brain/internal/domain"
 	"github.com/frankirova/project-brain/internal/httpapi"
+	"github.com/frankirova/project-brain/internal/httpapi/ratelimit"
 	"github.com/frankirova/project-brain/internal/postgres"
 	"github.com/frankirova/project-brain/internal/telegram"
 	tgbot "github.com/go-telegram/bot"
@@ -55,9 +57,14 @@ func main() {
 	mux.Handle("POST /v1/ingest-text", handler)
 	mux.Handle("GET /v1/health", &httpapi.HealthHandler{})
 
+	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
+	logger.Info("rate limit enabled",
+		slog.Float64("rps", cfg.RateLimitRPS),
+		slog.Float64("burst", cfg.RateLimitBurst))
+
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: mux,
+		Handler: limiter.Middleware(mux),
 	}
 
 	go func() {

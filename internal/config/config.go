@@ -17,11 +17,13 @@ const (
 // scaffold. Persistence settings are present but optional until the
 // PostgreSQL implementation work unit is introduced.
 type Config struct {
-	Environment      string
-	Port             string
-	DatabaseDSN      string
-	ShutdownSecs     int
-	TelegramBotToken string
+	Environment       string
+	Port              string
+	DatabaseDSN       string
+	TelegramBotToken  string
+	ShutdownSecs      int
+	RateLimitRPS      float64
+	RateLimitBurst    float64
 }
 
 // ShutdownTimeout returns the configured shutdown grace period.
@@ -40,8 +42,10 @@ func Load() (Config, error) {
 		Environment:      valueOrDefault("PROJECT_BRAIN_ENV", defaultEnvironment),
 		Port:             valueOrDefault("PROJECT_BRAIN_API_PORT", defaultPort),
 		DatabaseDSN:      os.Getenv("PROJECT_BRAIN_DATABASE_DSN"),
-		ShutdownSecs:     intEnvOrDefault("PROJECT_BRAIN_SHUTDOWN_SECS", defaultShutdownSec),
 		TelegramBotToken: os.Getenv("PROJECT_BRAIN_TELEGRAM_BOT_TOKEN"),
+		ShutdownSecs:     intEnvOrDefault("PROJECT_BRAIN_SHUTDOWN_SECS", defaultShutdownSec),
+		RateLimitRPS:     floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_RPS", 5),
+		RateLimitBurst:   floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_BURST", 10),
 	}
 
 	if err := validatePort(cfg.Port); err != nil {
@@ -71,6 +75,15 @@ func validatePort(port string) error {
 func intEnvOrDefault(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+func floatEnvOrDefault(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			return n
 		}
 	}
