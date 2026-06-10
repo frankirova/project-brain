@@ -71,8 +71,18 @@ func main() {
 	publicMux.Handle("GET /v1/health", &httpapi.HealthHandler{})
 
 	// Protected mux: ingest endpoint goes through auth then rate limit.
+	// Search endpoint is also protected (it reads tenant data, so auth
+	// and rate limit apply). The search handler is only registered
+	// when a Postgres-backed retriever is available.
 	protectedMux := http.NewServeMux()
 	protectedMux.Handle("POST /v1/ingest-text", handler)
+	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
+		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
+		protectedMux.Handle("GET /v1/search", httpapi.NewSearchHandler(ftsRetriever))
+		logger.Info("search endpoint enabled", slog.String("retriever", "fts"))
+	} else {
+		logger.Info("search endpoint disabled", slog.String("reason", "no postgres backend"))
+	}
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
 	limiter.SetTrustProxy(cfg.TrustProxy)

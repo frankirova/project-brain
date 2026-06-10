@@ -44,6 +44,14 @@ func (db *DB) Close() {
 	db.pool.Close()
 }
 
+// Pool returns the underlying pgx connection pool. The FTS retriever
+// (and future vector/structured retrievers) read from a different
+// surface than the ingestion UoW, so they need direct pool access
+// rather than going through WithinIngestionTx.
+func (db *DB) Pool() *pgxpool.Pool {
+	return db.pool
+}
+
 func (db *DB) WithinIngestionTx(ctx context.Context, fn func(context.Context, app.IngestionRepositories) error) error {
 	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
