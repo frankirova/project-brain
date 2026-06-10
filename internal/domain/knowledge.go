@@ -6,6 +6,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// Metadata is an open-ended key/value bag persisted as JSONB. It is
+// `map[string]any` to keep the wire format permissive, but the
+// application layer should use one of the typed sub-structs below
+// or a documented set of well-known keys for new code.
+//
+// Reserved keys:
+//   - "chat_id"     — Telegram chat ID (string of int64)
+//   - "user_id"     — Telegram user ID (string of int64)
+//   - "importance"  — legacy short-form marker ("high"|"medium"|"low")
 type Metadata map[string]any
 
 const (
