@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
@@ -46,6 +47,13 @@ type errorResponse struct {
 
 // ServeHTTP decodes the request, calls the service, and writes the response.
 func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	logger := slog.Default()
+	logger.Debug("ingest request received",
+		slog.String("method", r.Method),
+		slog.String("path", r.URL.Path),
+		slog.String("remote_addr", r.RemoteAddr))
+
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxBodySize)
 
 	var req ingestTextRequest
@@ -73,21 +81,30 @@ func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Object:      req.Object,
 	}
 
-	result, err := h.service.Ingest(r.Context(), domainReq)
-	if err != nil {
-		switch {
-		case errors.Is(err, app.ErrValidation):
-			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
-		case errors.Is(err, app.ErrNotFound):
-			writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-		default:
-			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+		result, err := h.service.Ingest(r.Context(), domainReq)
+		if err != nil {
+			logger.Debug("ingest rejected by service",
+				slog.String("workspace_id", domainReq.WorkspaceID),
+				slog.String("error", err.Error()),
+				slog.Duration("elapsed", time.Since(start)))
+			switch {
+			case errors.Is(err, app.ErrValidation):
+				writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+			case errors.Is(err, app.ErrNotFound):
+				writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+			default:
+				writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+			}
+			return
 		}
-		return
-	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+		logger.Debug("ingest http response sent",
+			slog.String("workspace_id", domainReq.WorkspaceID),
+			slog.Bool("duplicate", result.Duplicate),
+			slog.Duration("elapsed", time.Since(start)))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		// Mid-write encode failure produces a truncated response
 		// the client cannot parse. Log so an operator can spot it
