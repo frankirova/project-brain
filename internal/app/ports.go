@@ -28,6 +28,10 @@ type SourceRepository interface {
 
 type KnowledgeObjectRepository interface {
 	Create(ctx context.Context, object domain.KnowledgeObject) error
+	// UpdateStatus mutates an existing object's lifecycle status. Returns
+	// ErrNotFound if no row matches (workspace_id, id). Implementations
+	// must also bump updated_at to now().
+	UpdateStatus(ctx context.Context, workspaceID string, id uuid.UUID, status string) error
 }
 
 type ObjectSourceRepository interface {

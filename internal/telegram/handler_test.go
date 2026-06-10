@@ -57,6 +57,9 @@ func (r *fakeSourceRepo) Create(_ context.Context, _ domain.Source) error { retu
 type fakeObjectRepo struct{}
 
 func (r *fakeObjectRepo) Create(_ context.Context, _ domain.KnowledgeObject) error { return nil }
+func (r *fakeObjectRepo) UpdateStatus(_ context.Context, _ string, _ uuid.UUID, _ string) error {
+	return nil
+}
 
 type fakeLinkRepo struct{}
 

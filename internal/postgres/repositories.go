@@ -132,6 +132,22 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)
 	return err
 }
 
+func (r *knowledgeObjectRepository) UpdateStatus(ctx context.Context, workspaceID string, id uuid.UUID, status string) error {
+	tag, err := r.tx.Exec(ctx, `
+UPDATE knowledge_objects
+SET status = $3, updated_at = now()
+WHERE workspace_id = $1 AND id = $2`,
+		workspaceID, id, status,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return app.ErrNotFound
+	}
+	return nil
+}
+
 type objectSourceRepository struct {
 	tx pgx.Tx
 }

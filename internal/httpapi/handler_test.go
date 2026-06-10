@@ -86,6 +86,10 @@ func (r *fakeObjectRepo) Create(_ context.Context, object domain.KnowledgeObject
 	return nil
 }
 
+func (r *fakeObjectRepo) UpdateStatus(_ context.Context, _ string, _ uuid.UUID, _ string) error {
+	return nil
+}
+
 type fakeLinkRepo struct {
 	err     error
 	created []domain.ObjectSource

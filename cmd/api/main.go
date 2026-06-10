@@ -18,6 +18,7 @@ import (
 	"github.com/frankirova/project-brain/internal/postgres"
 	"github.com/frankirova/project-brain/internal/telegram"
 	tgbot "github.com/go-telegram/bot"
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -183,6 +184,10 @@ func (r *noopSourceRepo) Create(_ context.Context, _ domain.Source) error {
 type noopObjectRepo struct{}
 
 func (r *noopObjectRepo) Create(_ context.Context, _ domain.KnowledgeObject) error {
+	return nil
+}
+
+func (r *noopObjectRepo) UpdateStatus(_ context.Context, _ string, _ uuid.UUID, _ string) error {
 	return nil
 }
 
