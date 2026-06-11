@@ -194,13 +194,16 @@ VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
 	return err
 }
 
-// marshalMetadata encodes Metadata for a JSONB column. A nil map
-// becomes SQL NULL, an empty map becomes '{}'. This preserves the
-// distinction between "no metadata" and "explicitly empty metadata",
-// which matters for Fase 3's "cleared on validate" semantics.
+// marshalMetadata encodes Metadata for a JSONB column. A nil OR empty
+// map becomes '{}'. The sources and knowledge_objects metadata columns
+// are NOT NULL DEFAULT '{}'; writing an explicit SQL NULL violates the
+// constraint (the DEFAULT only applies when the column is omitted from
+// the INSERT, not when NULL is passed). So nil must serialize to an
+// empty JSON object, not NULL — otherwise a metadata-less ingest fails
+// with a 23502 not-null violation.
 func marshalMetadata(metadata domain.Metadata) ([]byte, error) {
 	if metadata == nil {
-		return nil, nil
+		return []byte("{}"), nil
 	}
 	return json.Marshal(metadata)
 }
