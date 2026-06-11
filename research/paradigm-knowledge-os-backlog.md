@@ -112,9 +112,9 @@ Origen: `openspec/changes/paradigm-knowledge-os/{exploration.md, proposal.md, de
 - [x] 1.2 Semántica NACK de NATS — **DECIDIDO 2026-06-10**: default del backlog + 5 refinaciones (at-least-once + idempotencia, `BackOff` server-side, `MaxDeliver = 5/3` por worker, DLQ advisory-driven a `{subject}.dlq`, `Term()` para poison). Ver `research/01-2-nats-nack-semantics.md`.
 - [x] 1.3 Transactional outbox — **DECIDIDO 2026-06-10**: opción A con `pending_events` + drainer polling `FOR UPDATE SKIP LOCKED` cada 100ms, mark-don't-delete con GC a 7 días, multi-drainer safe. Ver `research/01-3-transactional-outbox.md`.
 - [x] 1.4 Forma del test rename (change #5) — **DECIDIDO 2026-06-10**: test canónico con 5 capas de assertion (panicking fakes en LLM/NATS/Embedder, 3 escrituras raw_input+audit_event+pending_events, latencia < 100ms, goleak) + 3 tests hermanos granulares con call recorders. Refactor mínimo del constructor a `IngestTextDeps`. Ver `research/01-4-4-write-contract-test.md`.
-- [ ] 2.1 `knowledge-compiler` — acuerdo sobre `agreement_score`
-- [ ] 2.2 `event-bus-nats` — riesgo pgx/shutdown
-- [ ] 2.3 `agents-shared-brain` — refactor de frontera
-- [ ] 2.4 `relations-bidirectional-and-freshness` — plan de columnas
+- [ ] 2.1 `knowledge-compiler` — acuerdo sobre `agreement_score` — en análisis
+- [x] 2.2 `event-bus-nats` — **DECIDIDO 2026-06-10**: JetStream + outbox writer + drainer (`cmd/drainer`) + DLQ-watcher (`cmd/dlq-watcher`) + shutdown coordination (NATS drena antes de pgx). 1 semana, 2 procesos separados. Ver `research/02-2-event-bus-nats.md`.
+- [ ] 2.3 `agents-shared-brain` — refactor de frontera — en análisis
+- [x] 2.4 `relations-bidirectional-and-freshness` — **DECIDIDO 2026-06-10**: agregar 3 columnas (`weight`, `valid_from`, `valid_until`), nuevo `GraphExpander` retriever con CTE bidireccional, 3 índices (`CONCURRENTLY`), `agreement_score` queda como follow-up (½ día, ADR-002). Ver `research/02-4-relations-bidirectional-freshness.md`.
 - [ ] 3. Brechas de `exploration.md` — todas mapeadas a un change
 - [ ] 4. Quick wins ejecutados (#11, #13, #15) — #11 y #13 listos (analizados), #15 en análisis
