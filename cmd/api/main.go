@@ -15,6 +15,7 @@ import (
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/app/inmem"
 	"github.com/frankirova/project-brain/internal/config"
+	"github.com/frankirova/project-brain/internal/gemini"
 	"github.com/frankirova/project-brain/internal/httpapi"
 	"github.com/frankirova/project-brain/internal/httpapi/auth"
 	"github.com/frankirova/project-brain/internal/httpapi/ratelimit"
@@ -63,6 +64,49 @@ func main() {
 	}
 
 	svc := app.NewIngestTextService(uow)
+
+	// Retrieval + embedding wiring. Built once so the embedder is shared
+	// between the write path (post-ingest embedding hook) and the read
+	// path (vector search). The search/object handlers are only created
+	// when a Postgres backend is available.
+	//   - Postgres only            -> FTS search.
+	//   - Postgres + Gemini key    -> hybrid search (FTS + vector, RRF)
+	//                                 and the embedding hook on ingest.
+	var searchHandler http.Handler
+	var objectHandler http.Handler
+	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
+		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
+		objectHandler = httpapi.NewObjectHandler(ftsRetriever)
+
+		if cfg.GeminiAPIKey != "" {
+			embedder := gemini.NewEmbedder(cfg.GeminiAPIKey)
+			embeddingRepo := postgres.NewEmbeddingRepo(pgDB.Pool())
+
+			// Write path: embed every new object after commit (best-effort).
+			// The hook runs outside the ingest transaction, so a Gemini
+			// outage degrades search recall but never blocks ingestion.
+			svc.SetPostIngestHook(app.NewEmbeddingHook(embedder, embeddingRepo))
+
+			// Read path: fuse FTS + vector with Reciprocal Rank Fusion. The
+			// FTS retriever doubles as the object hydrator for both paths.
+			vectorRetriever := postgres.NewVectorRetriever(embedder, embeddingRepo, ftsRetriever, 0)
+			composite := app.NewCompositeRetriever([]app.Retriever{ftsRetriever, vectorRetriever}, 0, 0)
+			composite.SetHydrator(ftsRetriever)
+			searchHandler = httpapi.NewSearchHandler(composite)
+
+			logger.Info("hybrid search enabled (fts + vector)",
+				slog.String("provider", "gemini"),
+				slog.String("model", embedder.Model()),
+				slog.Int("dimensions", embedder.Dimensions()))
+		} else {
+			searchHandler = httpapi.NewSearchHandler(ftsRetriever)
+			logger.Info("search enabled (fts only)",
+				slog.String("reason", "PROJECT_BRAIN_GEMINI_API_KEY unset; vector search off"))
+		}
+	} else {
+		logger.Info("search + object endpoints disabled", slog.String("reason", "no postgres backend"))
+	}
+
 	handler := httpapi.NewIngestTextHandler(svc, cfg.IngestMaxBytes)
 
 	// Public mux: only the health probe. No auth, no rate limit — health
@@ -71,18 +115,13 @@ func main() {
 	publicMux.Handle("GET /v1/health", &httpapi.HealthHandler{})
 
 	// Protected mux: ingest endpoint goes through auth then rate limit.
-	// Search endpoint is also protected (it reads tenant data, so auth
-	// and rate limit apply). The search handler is only registered
-	// when a Postgres-backed retriever is available.
+	// Search and object endpoints are also protected (they read tenant
+	// data). They are only registered when a retriever was built above.
 	protectedMux := http.NewServeMux()
 	protectedMux.Handle("POST /v1/ingest-text", handler)
-	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
-		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
-		protectedMux.Handle("GET /v1/search", httpapi.NewSearchHandler(ftsRetriever))
-		protectedMux.Handle("GET /v1/objects/{id}", httpapi.NewObjectHandler(ftsRetriever))
-		logger.Info("search + object endpoints enabled", slog.String("retriever", "fts"))
-	} else {
-		logger.Info("search + object endpoints disabled", slog.String("reason", "no postgres backend"))
+	if searchHandler != nil {
+		protectedMux.Handle("GET /v1/search", searchHandler)
+		protectedMux.Handle("GET /v1/objects/{id}", objectHandler)
 	}
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)

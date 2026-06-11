@@ -49,11 +49,20 @@ type IDGenerator func() uuid.UUID
 
 type Clock func() time.Time
 
+// PostIngestHook runs after a successful, non-duplicate ingest, OUTSIDE
+// the transaction. It is best-effort: IngestTextService logs and swallows
+// any error it returns, so the ingest contract (and the sacred 4-write
+// count) is unaffected even when the hook calls an external service like
+// an embedding API. The canonical use is generating and storing the
+// object's embedding.
+type PostIngestHook func(ctx context.Context, obj domain.KnowledgeObject) error
+
 type IngestTextService struct {
-	uow    IngestionUnitOfWork
-	ids    IDGenerator
-	now    Clock
-	logger *slog.Logger
+	uow        IngestionUnitOfWork
+	ids        IDGenerator
+	now        Clock
+	logger     *slog.Logger
+	postIngest PostIngestHook
 }
 
 func NewIngestTextService(uow IngestionUnitOfWork) *IngestTextService {
@@ -67,6 +76,14 @@ func NewIngestTextServiceWithDependencies(uow IngestionUnitOfWork, ids IDGenerat
 	return &IngestTextService{uow: uow, ids: ids, now: now, logger: logger}
 }
 
+// SetPostIngestHook wires a best-effort hook to run after each successful
+// non-duplicate ingest. Intended for composition-root (wire-time) use:
+// the hook is invoked outside the ingest transaction, so it can call
+// external services without affecting the 4-write contract.
+func (s *IngestTextService) SetPostIngestHook(h PostIngestHook) {
+	s.postIngest = h
+}
+
 func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextRequest) (domain.IngestTextResult, error) {
 	start := s.now()
 	prepared, err := prepareIngestText(req)
@@ -78,6 +95,9 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 	}
 
 	var result domain.IngestTextResult
+	// createdObject is captured from inside the transaction so the
+	// post-ingest hook (e.g. embedding) can run on it after commit.
+	var createdObject domain.KnowledgeObject
 	err = s.uow.WithinIngestionTx(ctx, func(ctx context.Context, repos IngestionRepositories) error {
 		existing, err := repos.Sources().FindIngestionResultByIdentityKey(ctx, prepared.workspaceID, prepared.identityKey)
 		if err == nil {
@@ -157,6 +177,7 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 			return err
 		}
 
+		createdObject = object
 		result = domain.IngestTextResult{
 			SourceID:        sourceID,
 			ObjectID:        objectID,
@@ -181,6 +202,20 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 		slog.String("source_id", result.SourceID.String()),
 		slog.String("object_id", result.ObjectID.String()),
 		slog.Duration("elapsed", s.now().Sub(start)))
+
+	// Best-effort post-ingest work (e.g. embedding). Runs outside the
+	// transaction and never fails the ingest: a hook error degrades a
+	// downstream capability (search recall) but the knowledge is already
+	// durably committed. Duplicates are skipped — the object, and its
+	// embedding, already exist.
+	if !result.Duplicate && s.postIngest != nil {
+		if hookErr := s.postIngest(ctx, createdObject); hookErr != nil {
+			s.logger.Warn("post-ingest hook failed (best-effort, ingest unaffected)",
+				slog.String("workspace_id", prepared.workspaceID),
+				slog.String("object_id", result.ObjectID.String()),
+				slog.String("error", hookErr.Error()))
+		}
+	}
 
 	return result, nil
 }
