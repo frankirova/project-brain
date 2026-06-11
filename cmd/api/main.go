@@ -74,6 +74,7 @@ func main() {
 	//                                 and the embedding hook on ingest.
 	var searchHandler http.Handler
 	var objectHandler http.Handler
+	var collisionHandler http.Handler
 	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
 		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
 		objectHandler = httpapi.NewObjectHandler(ftsRetriever)
@@ -94,7 +95,12 @@ func main() {
 			composite.SetHydrator(ftsRetriever)
 			searchHandler = httpapi.NewSearchHandler(composite)
 
-			logger.Info("hybrid search enabled (fts + vector)",
+			// Collision detection: "what existing knowledge would this clash
+			// with?" — embeds candidate text and returns similar objects.
+			collisionDetector := app.NewCollisionDetector(embedder, embeddingRepo, ftsRetriever, 0, 0)
+			collisionHandler = httpapi.NewCollisionHandler(collisionDetector, cfg.IngestMaxBytes)
+
+			logger.Info("hybrid search + collision detection enabled",
 				slog.String("provider", "gemini"),
 				slog.String("model", embedder.Model()),
 				slog.Int("dimensions", embedder.Dimensions()))
@@ -122,6 +128,9 @@ func main() {
 	if searchHandler != nil {
 		protectedMux.Handle("GET /v1/search", searchHandler)
 		protectedMux.Handle("GET /v1/objects/{id}", objectHandler)
+	}
+	if collisionHandler != nil {
+		protectedMux.Handle("POST /v1/check-collision", collisionHandler)
 	}
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)

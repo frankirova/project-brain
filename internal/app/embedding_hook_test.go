@@ -29,6 +29,9 @@ func (f *fakeEmbedder) Model() string   { return "fake-model" }
 type fakeEmbeddingRepo struct {
 	upserted []domain.Embedding
 	err      error
+	// similar and findErr drive FindSimilar (used by collision tests).
+	similar []ScoredSearchHit
+	findErr error
 }
 
 func (r *fakeEmbeddingRepo) Upsert(_ context.Context, emb domain.Embedding) error {
@@ -40,7 +43,7 @@ func (r *fakeEmbeddingRepo) Upsert(_ context.Context, emb domain.Embedding) erro
 }
 
 func (r *fakeEmbeddingRepo) FindSimilar(_ context.Context, _ string, _ []float32, _ int) ([]ScoredSearchHit, error) {
-	return nil, nil
+	return r.similar, r.findErr
 }
 
 func TestEmbeddingHookUpsertsVectorWithMetadata(t *testing.T) {
