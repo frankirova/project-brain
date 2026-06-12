@@ -223,7 +223,7 @@ Resultados del audit post-Fase 1 con estado actual.
 | C1 | Telegram usaba `log` en vez de `slog` | ✅ Resuelto: `*slog.Logger` inyectado |
 | C2 | `Status` era string libre sin enum | ✅ Resuelto: enum const + CHECK constraint en migration 0005 |
 | C3 | No había `Update` en `KnowledgeObjectRepository` | ✅ Resuelto: `UpdateStatus` agregado |
-| C4 | No había `Retriever` port | ⏳ Pendiente: próximo cambio de Fase 2 |
+| C4 | No había `Retriever` port | ✅ Resuelto: `Retriever` port + `FTSRetriever` + `CompositeRetriever` |
 
 ### HIGH — significant debt
 

@@ -134,11 +134,13 @@ PROJECT_BRAIN_TEST_DATABASE_DSN="postgres://postgres:postgres@127.0.0.1:5433/pro
 ```
 project-brain/
 ├── cmd/api/                          # Composition root (HTTP + Telegram)
+├── cmd/mcp/                          # MCP stdio server entrypoint
 ├── internal/
 │   ├── config/                       # Config desde env vars
 │   ├── domain/                       # Entidades puras (Source, KnowledgeObject, Relation, AuditEvent)
 │   ├── app/                          # Use cases (IngestTextService) + ports
 │   ├── httpapi/                      # Adaptador HTTP (POST /v1/ingest-text, GET /v1/health)
+│   ├── mcp/                          # Tools MCP para agentes
 │   ├── telegram/                     # Adaptador Telegram (go-telegram/bot)
 │   └── postgres/                     # Repositorio PostgreSQL (pgx/v5)
 ├── migrations/                       # SQL migrations
@@ -174,6 +176,7 @@ Ver `ROADMAP.md` para el plan completo (Fase 2: Hybrid RAG, Fase 3: Human-in-the
 - **PostgreSQL 16** (con pgvector) — base principal, FTS, transacciones, JSONB
 - **pgx/v5** — driver Postgres (zero-dependency friendly)
 - **go-telegram/bot** — librería de Telegram (zero deps, polling + webhook)
+- **MCP stdio server** — expone search/collision/save como tools JSON-RPC para agentes
 - **Docker** — Postgres + API en un `docker compose up`
 
 ## License
