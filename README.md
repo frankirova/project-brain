@@ -85,6 +85,7 @@ docker exec hermes-agents-postgres-1 psql -U postgres -d project_brain -c \
    FROM knowledge_objects
    WHERE search_vector @@ to_tsquery('simple', 'conocimiento')
    ORDER BY rank DESC"
+```
 
 ### Bot de Telegram (opcional)
 
