@@ -72,8 +72,8 @@ LIMIT $3`
 	var results []app.SearchResult
 	for rows.Next() {
 		var (
-			obj         domain.KnowledgeObject
-			score       float64
+			obj   domain.KnowledgeObject
+			score float64
 		)
 		if err := rows.Scan(
 			&obj.ID,

@@ -18,7 +18,7 @@ import (
 type Metadata map[string]any
 
 const (
-	SourceTypeText = "text"
+	SourceTypeText              = "text"
 	KnowledgeObjectTypeDocument = "document"
 
 	// KnowledgeObjectStatus is the lifecycle of a knowledge object.
@@ -105,10 +105,10 @@ type AuditEvent struct {
 // does not enforce this list yet (forward-compatible), but the app
 // layer should use these constants for consistency.
 const (
-	AuditActionKnowledgeIngested         = "knowledge.ingested"
+	AuditActionKnowledgeIngested          = "knowledge.ingested"
 	AuditActionKnowledgeDuplicateDetected = "knowledge.duplicate_detected"
-	AuditActionKnowledgeStatusChanged    = "knowledge.status_changed"
-	AuditActionRelationCreated           = "relation.created"
+	AuditActionKnowledgeStatusChanged     = "knowledge.status_changed"
+	AuditActionRelationCreated            = "relation.created"
 )
 
 // AuditTargetType enumerates the recognized audit target types.

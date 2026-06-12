@@ -81,30 +81,30 @@ func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Object:      req.Object,
 	}
 
-		result, err := h.service.Ingest(r.Context(), domainReq)
-		if err != nil {
-			logger.Debug("ingest rejected by service",
-				slog.String("workspace_id", domainReq.WorkspaceID),
-				slog.String("error", err.Error()),
-				slog.Duration("elapsed", time.Since(start)))
-			switch {
-			case errors.Is(err, app.ErrValidation):
-				writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
-			case errors.Is(err, app.ErrNotFound):
-				writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-			default:
-				writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
-			}
-			return
-		}
-
-		logger.Debug("ingest http response sent",
+	result, err := h.service.Ingest(r.Context(), domainReq)
+	if err != nil {
+		logger.Debug("ingest rejected by service",
 			slog.String("workspace_id", domainReq.WorkspaceID),
-			slog.Bool("duplicate", result.Duplicate),
+			slog.String("error", err.Error()),
 			slog.Duration("elapsed", time.Since(start)))
+		switch {
+		case errors.Is(err, app.ErrValidation):
+			writeError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		case errors.Is(err, app.ErrNotFound):
+			writeError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+		}
+		return
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+	logger.Debug("ingest http response sent",
+		slog.String("workspace_id", domainReq.WorkspaceID),
+		slog.Bool("duplicate", result.Duplicate),
+		slog.Duration("elapsed", time.Since(start)))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		// Mid-write encode failure produces a truncated response
 		// the client cannot parse. Log so an operator can spot it

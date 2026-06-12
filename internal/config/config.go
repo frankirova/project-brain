@@ -17,17 +17,17 @@ const (
 // scaffold. Persistence settings are present but optional until the
 // PostgreSQL implementation work unit is introduced.
 type Config struct {
-	Environment       string
-	Port              string
-	DatabaseDSN       string
-	TelegramBotToken  string
-	AuthToken         string
-	GeminiAPIKey      string
-	ShutdownSecs      int
-	RateLimitRPS      float64
-	RateLimitBurst    float64
-	TrustProxy        bool
-	IngestMaxBytes    int64
+	Environment      string
+	Port             string
+	DatabaseDSN      string
+	TelegramBotToken string
+	AuthToken        string
+	GeminiAPIKey     string
+	ShutdownSecs     int
+	RateLimitRPS     float64
+	RateLimitBurst   float64
+	TrustProxy       bool
+	IngestMaxBytes   int64
 }
 
 // ShutdownTimeout returns the configured shutdown grace period.

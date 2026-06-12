@@ -68,7 +68,7 @@ func (c *CompositeRetriever) Search(ctx context.Context, q SearchQuery) ([]Searc
 	// Fan out.
 	type result struct {
 		hits []ScoredSearchHit
-		err error
+		err  error
 	}
 	results := make([]result, len(c.primaries))
 	var wg sync.WaitGroup
@@ -207,7 +207,7 @@ func fanOut(ctx context.Context, r Retriever, q SearchQuery) ([]ScoredSearchHit,
 	}
 	type out struct {
 		hits []ScoredSearchHit
-		err error
+		err  error
 	}
 	ch := make(chan out, 1)
 	go func() {

@@ -111,6 +111,7 @@ func (d *CollisionDetector) Detect(ctx context.Context, workspaceID, text string
 //   - ~0.58-0.64  unrelated topics (filtered out below DefaultCollisionThreshold)
 //   - ~0.78-0.85  same topic / direct contradiction (a real collision)
 //   - ~0.90+      near-identical restatement (a duplicate)
+//
 // The bands sit on those clusters so a topical clash reads as
 // strong_overlap rather than being undersold as merely related.
 func collisionVerdict(score float64) string {
