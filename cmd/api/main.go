@@ -15,6 +15,7 @@ import (
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/app/inmem"
 	"github.com/frankirova/project-brain/internal/config"
+	"github.com/frankirova/project-brain/internal/gemini"
 	"github.com/frankirova/project-brain/internal/httpapi"
 	"github.com/frankirova/project-brain/internal/httpapi/auth"
 	"github.com/frankirova/project-brain/internal/httpapi/ratelimit"
@@ -63,6 +64,59 @@ func main() {
 	}
 
 	svc := app.NewIngestTextService(uow)
+
+	// Retrieval + embedding wiring. Built once so the embedder is shared
+	// between the write path (post-ingest embedding hook) and the read
+	// path (vector search). The search/object handlers are only created
+	// when a Postgres backend is available.
+	//   - Postgres only            -> FTS search.
+	//   - Postgres + Gemini key    -> hybrid search (FTS + vector, RRF)
+	//                                 and the embedding hook on ingest.
+	var searchHandler http.Handler
+	var objectHandler http.Handler
+	var collisionHandler http.Handler
+	// collisionDetector is hoisted so the Telegram handler (built later)
+	// can reuse it for the human-in-the-loop validation flow. Stays nil
+	// when vector search is off.
+	var collisionDetector *app.CollisionDetector
+	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
+		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
+		objectHandler = httpapi.NewObjectHandler(ftsRetriever)
+
+		if cfg.GeminiAPIKey != "" {
+			embedder := gemini.NewEmbedder(cfg.GeminiAPIKey)
+			embeddingRepo := postgres.NewEmbeddingRepo(pgDB.Pool())
+
+			// Write path: embed every new object after commit (best-effort).
+			// The hook runs outside the ingest transaction, so a Gemini
+			// outage degrades search recall but never blocks ingestion.
+			svc.SetPostIngestHook(app.NewEmbeddingHook(embedder, embeddingRepo))
+
+			// Read path: fuse FTS + vector with Reciprocal Rank Fusion. The
+			// FTS retriever doubles as the object hydrator for both paths.
+			vectorRetriever := postgres.NewVectorRetriever(embedder, embeddingRepo, ftsRetriever, 0)
+			composite := app.NewCompositeRetriever([]app.Retriever{ftsRetriever, vectorRetriever}, 0, 0)
+			composite.SetHydrator(ftsRetriever)
+			searchHandler = httpapi.NewSearchHandler(composite)
+
+			// Collision detection: "what existing knowledge would this clash
+			// with?" — embeds candidate text and returns similar objects.
+			collisionDetector = app.NewCollisionDetector(embedder, embeddingRepo, ftsRetriever, 0, 0)
+			collisionHandler = httpapi.NewCollisionHandler(collisionDetector, cfg.IngestMaxBytes)
+
+			logger.Info("hybrid search + collision detection enabled",
+				slog.String("provider", "gemini"),
+				slog.String("model", embedder.Model()),
+				slog.Int("dimensions", embedder.Dimensions()))
+		} else {
+			searchHandler = httpapi.NewSearchHandler(ftsRetriever)
+			logger.Info("search enabled (fts only)",
+				slog.String("reason", "PROJECT_BRAIN_GEMINI_API_KEY unset; vector search off"))
+		}
+	} else {
+		logger.Info("search + object endpoints disabled", slog.String("reason", "no postgres backend"))
+	}
+
 	handler := httpapi.NewIngestTextHandler(svc, cfg.IngestMaxBytes)
 
 	// Public mux: only the health probe. No auth, no rate limit — health
@@ -71,18 +125,16 @@ func main() {
 	publicMux.Handle("GET /v1/health", &httpapi.HealthHandler{})
 
 	// Protected mux: ingest endpoint goes through auth then rate limit.
-	// Search endpoint is also protected (it reads tenant data, so auth
-	// and rate limit apply). The search handler is only registered
-	// when a Postgres-backed retriever is available.
+	// Search and object endpoints are also protected (they read tenant
+	// data). They are only registered when a retriever was built above.
 	protectedMux := http.NewServeMux()
 	protectedMux.Handle("POST /v1/ingest-text", handler)
-	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
-		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
-		protectedMux.Handle("GET /v1/search", httpapi.NewSearchHandler(ftsRetriever))
-		protectedMux.Handle("GET /v1/objects/{id}", httpapi.NewObjectHandler(ftsRetriever))
-		logger.Info("search + object endpoints enabled", slog.String("retriever", "fts"))
-	} else {
-		logger.Info("search + object endpoints disabled", slog.String("reason", "no postgres backend"))
+	if searchHandler != nil {
+		protectedMux.Handle("GET /v1/search", searchHandler)
+		protectedMux.Handle("GET /v1/objects/{id}", objectHandler)
+	}
+	if collisionHandler != nil {
+		protectedMux.Handle("POST /v1/check-collision", collisionHandler)
 	}
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)
@@ -126,7 +178,15 @@ func main() {
 	// Telegram bot: start polling only if token is configured.
 	var botWG sync.WaitGroup
 	if cfg.TelegramBotToken != "" {
-		tgHandler := telegram.NewHandler(svc, nil, logger)
+		// Pass a true nil interface when no detector exists — handing a
+		// typed-nil *app.CollisionDetector would make the handler's nil
+		// check fail and panic on the first message.
+		var tgHandler *telegram.Handler
+		if collisionDetector != nil {
+			tgHandler = telegram.NewHandler(svc, collisionDetector, nil, logger)
+		} else {
+			tgHandler = telegram.NewHandler(svc, nil, nil, logger)
+		}
 		b, err := tgbot.New(cfg.TelegramBotToken,
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),
 		)

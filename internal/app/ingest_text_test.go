@@ -276,6 +276,101 @@ func TestIngestDefaultsNilTagsToEmptySlice(t *testing.T) {
 	}
 }
 
+func TestIngestRunsPostIngestHookOnSuccess(t *testing.T) {
+	uow := newFakeUOW()
+	ids := fixedIDs{
+		uuid.MustParse("50000000-0000-0000-0000-000000000001"),
+		uuid.MustParse("50000000-0000-0000-0000-000000000002"),
+		uuid.MustParse("50000000-0000-0000-0000-000000000003"),
+	}
+	service := NewIngestTextServiceWithDependencies(uow, ids.next, time.Now, nil)
+
+	var hookObj domain.KnowledgeObject
+	calls := 0
+	service.SetPostIngestHook(func(_ context.Context, obj domain.KnowledgeObject) error {
+		calls++
+		hookObj = obj
+		return nil
+	})
+
+	result, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+		WorkspaceID: "workspace-1",
+		Content:     "knowledge to embed",
+	})
+	if err != nil {
+		t.Fatalf("Ingest() returned error: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("hook called %d times, want 1", calls)
+	}
+	if hookObj.ID != result.ObjectID {
+		t.Fatalf("hook object ID = %s, want %s", hookObj.ID, result.ObjectID)
+	}
+	// The hook must not change the sacred 4-write count.
+	if got := uow.repos.writeCount(); got != 4 {
+		t.Fatalf("writes = %d, want 4", got)
+	}
+}
+
+func TestIngestSkipsHookOnDuplicate(t *testing.T) {
+	uow := newFakeUOW()
+	uow.repos.source.existingResult = domain.IngestTextResult{
+		SourceID:     uuid.MustParse("51000000-0000-0000-0000-000000000001"),
+		ObjectID:     uuid.MustParse("51000000-0000-0000-0000-000000000002"),
+		AuditEventID: uuid.MustParse("51000000-0000-0000-0000-000000000003"),
+		IdentityKey:  "idem:seen",
+	}
+	service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+
+	calls := 0
+	service.SetPostIngestHook(func(_ context.Context, _ domain.KnowledgeObject) error {
+		calls++
+		return nil
+	})
+
+	result, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+		WorkspaceID: "workspace-1",
+		Content:     "dup",
+		Source:      domain.SourceInput{IdempotencyKey: "seen"},
+	})
+	if err != nil {
+		t.Fatalf("Ingest() returned error: %v", err)
+	}
+	if !result.Duplicate {
+		t.Fatal("expected duplicate result")
+	}
+	if calls != 0 {
+		t.Fatalf("hook called %d times on duplicate, want 0", calls)
+	}
+}
+
+func TestIngestSurvivesPostIngestHookError(t *testing.T) {
+	uow := newFakeUOW()
+	ids := fixedIDs{
+		uuid.MustParse("52000000-0000-0000-0000-000000000001"),
+		uuid.MustParse("52000000-0000-0000-0000-000000000002"),
+		uuid.MustParse("52000000-0000-0000-0000-000000000003"),
+	}
+	service := NewIngestTextServiceWithDependencies(uow, ids.next, time.Now, nil)
+	service.SetPostIngestHook(func(_ context.Context, _ domain.KnowledgeObject) error {
+		return errors.New("gemini down")
+	})
+
+	result, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+		WorkspaceID: "workspace-1",
+		Content:     "knowledge survives a failing hook",
+	})
+	if err != nil {
+		t.Fatalf("Ingest() must not fail when the hook errors: %v", err)
+	}
+	if result.ObjectID == (uuid.UUID{}) {
+		t.Fatal("result missing object ID; ingest should have succeeded")
+	}
+	if !uow.committed {
+		t.Fatal("transaction should have committed despite hook error")
+	}
+}
+
 type fakeUOW struct {
 	repos      *fakeRepos
 	started    bool

@@ -22,6 +22,7 @@ type Config struct {
 	DatabaseDSN       string
 	TelegramBotToken  string
 	AuthToken         string
+	GeminiAPIKey      string
 	ShutdownSecs      int
 	RateLimitRPS      float64
 	RateLimitBurst    float64
@@ -47,6 +48,7 @@ func Load() (Config, error) {
 		DatabaseDSN:      os.Getenv("PROJECT_BRAIN_DATABASE_DSN"),
 		TelegramBotToken: os.Getenv("PROJECT_BRAIN_TELEGRAM_BOT_TOKEN"),
 		AuthToken:        os.Getenv("PROJECT_BRAIN_AUTH_TOKEN"),
+		GeminiAPIKey:     os.Getenv("PROJECT_BRAIN_GEMINI_API_KEY"),
 		ShutdownSecs:     intEnvOrDefault("PROJECT_BRAIN_SHUTDOWN_SECS", defaultShutdownSec),
 		RateLimitRPS:     floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_RPS", 5),
 		RateLimitBurst:   floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_BURST", 10),

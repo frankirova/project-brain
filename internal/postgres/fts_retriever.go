@@ -49,9 +49,13 @@ func (r *FTSRetriever) Search(ctx context.Context, q app.SearchQuery) ([]app.Sea
 		limit = app.MaxSearchLimit
 	}
 
+	// title, summary, and created_by are nullable; COALESCE them to ''
+	// so a NULL does not fail the scan into a non-nullable Go string.
 	const query = `
-SELECT id, workspace_id, type, title, summary, content, status, metadata,
-       created_by, created_at, updated_at, project_id, tags, confidence, importance,
+SELECT id, workspace_id, type, COALESCE(title, '') AS title,
+       COALESCE(summary, '') AS summary, content, status, metadata,
+       COALESCE(created_by, '') AS created_by, created_at, updated_at,
+       project_id, tags, confidence, importance,
        ts_rank(search_vector, plainto_tsquery('simple', $1)) AS score
 FROM knowledge_objects
 WHERE workspace_id = $2
@@ -106,8 +110,10 @@ LIMIT $3`
 // instantiate the full UoW.
 func (r *FTSRetriever) FindByID(ctx context.Context, workspaceID string, id uuid.UUID) (*domain.KnowledgeObject, error) {
 	const query = `
-SELECT id, workspace_id, type, title, summary, content, status, metadata,
-       created_by, created_at, updated_at, project_id, tags, confidence, importance
+SELECT id, workspace_id, type, COALESCE(title, '') AS title,
+       COALESCE(summary, '') AS summary, content, status, metadata,
+       COALESCE(created_by, '') AS created_by, created_at, updated_at,
+       project_id, tags, confidence, importance
 FROM knowledge_objects
 WHERE workspace_id = $1 AND id = $2`
 	var (

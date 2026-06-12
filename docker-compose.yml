@@ -9,6 +9,17 @@ services:
       POSTGRES_DB: project_brain
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Auto-create the tables on first init of an empty data volume. The
+      # Postgres image runs every .sql in here in alphabetical order
+      # (0001..0007). NOTE: this only runs when pgdata is EMPTY. If you've
+      # started the stack before, run `docker compose down -v` first to
+      # wipe the volume so these run on a clean slate.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d project_brain"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
 
   api:
     build: .
@@ -16,8 +27,14 @@ services:
       - "8050:8050"
     environment:
       PROJECT_BRAIN_DATABASE_DSN: "postgres://postgres:postgres@postgres:5432/project_brain?sslmode=disable"
+    # Loads PROJECT_BRAIN_GEMINI_API_KEY (and any other secrets) from a
+    # local .env file. required:false so the stack still starts without it.
+    env_file:
+      - path: .env
+        required: false
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:
