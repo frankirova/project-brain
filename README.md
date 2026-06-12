@@ -149,7 +149,6 @@ project-brain/
 ├── docker-compose.yml
 ├── ROADMAP.md                        # Estado del proyecto y planes futuros
 ├── PROJECT_BRAIN.md                  # Visión completa del producto
-├── GO_CODE_WALKTHROUGH.md            # Paseo por el código (intro Go)
 └── README.md                         # Este archivo
 ```
 

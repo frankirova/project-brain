@@ -290,5 +290,4 @@ Resultados del audit post-Fase 1 con estado actual.
 - `PROJECT_BRAIN.md` — visión completa del producto, decisiones macro, arquitectura
 - `openspec/specs/` — source of truth de las capabilities implementadas
 - `openspec/changes/archive/` — audit trail de cada cambio (proposal + design + tasks + verify)
-- `GO_CODE_WALKTHROUGH.md` — paseo por el código Go (intro para nuevos devs)
 - `README.md` — cómo correr el proyecto
