@@ -75,6 +75,10 @@ func main() {
 	var searchHandler http.Handler
 	var objectHandler http.Handler
 	var collisionHandler http.Handler
+	// collisionDetector is hoisted so the Telegram handler (built later)
+	// can reuse it for the human-in-the-loop validation flow. Stays nil
+	// when vector search is off.
+	var collisionDetector *app.CollisionDetector
 	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
 		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
 		objectHandler = httpapi.NewObjectHandler(ftsRetriever)
@@ -97,7 +101,7 @@ func main() {
 
 			// Collision detection: "what existing knowledge would this clash
 			// with?" — embeds candidate text and returns similar objects.
-			collisionDetector := app.NewCollisionDetector(embedder, embeddingRepo, ftsRetriever, 0, 0)
+			collisionDetector = app.NewCollisionDetector(embedder, embeddingRepo, ftsRetriever, 0, 0)
 			collisionHandler = httpapi.NewCollisionHandler(collisionDetector, cfg.IngestMaxBytes)
 
 			logger.Info("hybrid search + collision detection enabled",
@@ -174,7 +178,15 @@ func main() {
 	// Telegram bot: start polling only if token is configured.
 	var botWG sync.WaitGroup
 	if cfg.TelegramBotToken != "" {
-		tgHandler := telegram.NewHandler(svc, nil, logger)
+		// Pass a true nil interface when no detector exists — handing a
+		// typed-nil *app.CollisionDetector would make the handler's nil
+		// check fail and panic on the first message.
+		var tgHandler *telegram.Handler
+		if collisionDetector != nil {
+			tgHandler = telegram.NewHandler(svc, collisionDetector, nil, logger)
+		} else {
+			tgHandler = telegram.NewHandler(svc, nil, nil, logger)
+		}
 		b, err := tgbot.New(cfg.TelegramBotToken,
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),
 		)
