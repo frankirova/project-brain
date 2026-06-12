@@ -235,3 +235,87 @@ type EmbeddingJobRepository interface {
 type KnowledgeObjectFinder interface {
 	FindByID(ctx context.Context, workspaceID string, id uuid.UUID) (*domain.KnowledgeObject, error)
 }
+
+// BacklogDefaultPageSize is the effective page size when
+// BacklogFilter.PageSize is 0 (or negative). The same value is
+// enforced both in the app layer (for the empty-page contract) and
+// in the postgres implementation (for SQL LIMIT clamping). Keeping
+// both sides aligned prevents a "service says 25, SQL says 100"
+// drift when the implementation is swapped (e.g., a future
+// in-memory fake for PR 4 integration tests).
+const BacklogDefaultPageSize = 25
+
+// BacklogMaxPageSize is the hard upper bound for BacklogFilter.PageSize.
+// Values above this are clamped to this constant before issuing
+// the SQL LIMIT. The bound exists for the same reason MaxSearchLimit
+// does: prevent a single HTTP request from selecting unbounded rows.
+const BacklogMaxPageSize = 100
+
+// BacklogFilter is the input to ListHumanBacklog. WorkspaceID is
+// the tenant scope; PageSize is clamped to [1, BacklogMaxPageSize]
+// (0 → BacklogDefaultPageSize, >BacklogMaxPageSize → BacklogMaxPageSize).
+// Cursor is the opaque token returned by the prior page's
+// NextCursor; an empty string means "first page". The service is
+// responsible for decoding the cursor; the postgres layer does not
+// parse it.
+type BacklogFilter struct {
+	WorkspaceID string
+	PageSize    int
+	Cursor      string
+}
+
+// BacklogItem is one row in the human backlog. The shape is a
+// trimmed projection of KnowledgeObject — only the fields the
+// human-facing UI needs to render a list row. IsStale is the
+// derived (status='debating' AND updated_at < now() - 14d) marker
+// per the spec; StaleForDays is the integer day count clamped to
+// non-negative (rows with future updated_at return 0).
+type BacklogItem struct {
+	ID           uuid.UUID
+	WorkspaceID  string
+	Type         string
+	Title        string
+	Summary      string
+	Status       string
+	UpdatedAt    time.Time
+	IsStale      bool
+	StaleForDays int
+}
+
+// BacklogPage is the response from ListHumanBacklog. Items is the
+// page of rows (length <= BacklogMaxPageSize). NextCursor is the
+// opaque token the caller passes back to fetch the next page; an
+// empty NextCursor means "no more pages" and the caller MUST stop
+// paginating.
+type BacklogPage struct {
+	Items      []BacklogItem
+	NextCursor string
+}
+
+// BacklogQuery is the read-side port for the human backlog. The
+// implementation is the postgres layer (newBacklogQuery), but a
+// fake is used in unit tests so the service can be exercised
+// without a live database.
+//
+// Implementations MUST:
+//
+//   - Clamp the effective page size to [1, BacklogMaxPageSize]
+//     with 0 defaulting to BacklogDefaultPageSize. A value of 0 is
+//     NOT a "limit 0" (which would mean "return everything"); it
+//     is "use the default".
+//   - Return ErrInvalidCursor when the supplied cursor does not
+//     decode as a valid backlog cursor. The check MUST happen
+//     before any database read so a malformed cursor never hits
+//     the SQL planner.
+//   - Filter strictly by workspace_id. The backlog is workspace-
+//     scoped with no cross-tenant leakage.
+//   - Include rows whose status is 'proposed' or 'debating', plus
+//     'deprecated' rows whose updated_at is within the last
+//     domain.BacklogRecentDeprecatedDays.
+//   - Project the derived is_stale / stale_for_days fields per
+//     the spec SQL projection.
+//   - Order by (updated_at DESC, id DESC) and apply a keyset
+//     cursor using (updated_at, id) < (cursor_updated_at, cursor_id).
+type BacklogQuery interface {
+	List(ctx context.Context, filter BacklogFilter) (BacklogPage, error)
+}
