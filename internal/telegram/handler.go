@@ -2,13 +2,15 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
+	"time"
 
 	"github.com/frankirova/project-brain/internal/app"
+	"github.com/frankirova/project-brain/internal/app/inmem"
 	"github.com/frankirova/project-brain/internal/domain"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -90,10 +92,19 @@ func (s *telegramSender) EditMessageText(ctx context.Context, chatID int64, mess
 // a collision was detected. It is keyed by a short token carried in the
 // inline buttons' callback data (Telegram caps callback data at 64 bytes,
 // so the full text cannot ride along — it waits here).
-type pendingValidation struct {
-	req       domain.IngestTextRequest
-	collision app.Collision
-}
+//
+// The on-disk shape lives in app.PendingValidation; this local alias
+// keeps the handler code free of repeated type names. The name stays
+// lower-case (unexported) to mark the alias as a handler-local
+// convenience; the underlying type is the same struct the store
+// receives and round-trips.
+type pendingValidation = app.PendingValidation
+
+// pendingStore is the storage boundary for in-flight validations. It
+// is an alias of app.PendingValidationStore so the handler depends on
+// the same interface the Postgres and in-memory implementations
+// satisfy.
+type pendingStore = app.PendingValidationStore
 
 // Handler processes Telegram updates and routes them to the ingestion
 // service, gated by collision detection + human validation.
@@ -101,36 +112,52 @@ type Handler struct {
 	service  *app.IngestTextService
 	detector collisionChecker // nil => legacy direct-ingest, no validation
 	sender   Sender
+	store    pendingStore // nil => in-memory fallback (local dev)
 	logger   *slog.Logger
-
-	// pending holds candidate inputs awaiting a button press. In-memory
-	// and single-instance: entries are lost on restart, which only means
-	// a stale button reports "expired" — the source message is untouched.
-	mu       sync.Mutex
-	pending  map[string]pendingValidation
 	newToken func() string
 }
 
-// NewHandler creates a Handler that sends responses via the given bot.
-// detector may be nil (disables collision validation; falls back to
-// direct ingestion). b may be nil — the bot is wired lazily by
-// DefaultHandler when the first update arrives. logger falls back to
-// slog.Default() when nil.
+// NewHandler creates a Handler that sends responses via the given bot
+// and stores pending validations in memory. Use NewHandlerWithStore to
+// plug in a durable (e.g. PostgreSQL) store. detector may be nil
+// (disables collision validation; falls back to direct ingestion). b
+// may be nil — the bot is wired lazily by DefaultHandler when the
+// first update arrives. logger falls back to slog.Default() when nil.
 func NewHandler(svc *app.IngestTextService, detector collisionChecker, b *bot.Bot, logger *slog.Logger) *Handler {
-	return newHandlerWithSender(svc, detector, &telegramSender{b: b}, logger)
+	return newHandlerWithStore(svc, detector, &telegramSender{b: b}, nil, logger)
 }
 
-// newHandlerWithSender creates a Handler with an injected Sender (for testing).
+// NewHandlerWithStore is like NewHandler but lets the caller wire a
+// durable PendingValidationStore. Pass nil to fall back to the
+// in-memory store (same as NewHandler). The composition root in
+// cmd/api/main.go passes the Postgres-backed store when the database
+// is available.
+func NewHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, b *bot.Bot, logger *slog.Logger, store pendingStore) *Handler {
+	return newHandlerWithStore(svc, detector, &telegramSender{b: b}, store, logger)
+}
+
+// newHandlerWithSender is the test seam: inject a Sender and a nil
+// store so existing tests run against the in-memory fallback.
 func newHandlerWithSender(svc *app.IngestTextService, detector collisionChecker, sender Sender, logger *slog.Logger) *Handler {
+	return newHandlerWithStore(svc, detector, sender, nil, logger)
+}
+
+// newHandlerWithStore is the single composition seam. store==nil
+// installs the in-memory fallback so local dev and the existing test
+// suite keep working without a database.
+func newHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, sender Sender, store pendingStore, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if store == nil {
+		store = inmem.NewPendingValidationStore()
 	}
 	return &Handler{
 		service:  svc,
 		detector: detector,
 		sender:   sender,
+		store:    store,
 		logger:   logger,
-		pending:  make(map[string]pendingValidation),
 		newToken: func() string { return uuid.NewString() },
 	}
 }
@@ -194,7 +221,25 @@ func (h *Handler) handleMessage(ctx context.Context, update *models.Update) erro
 	// Collision detected: ask the human before this becomes canonical.
 	top := collisions[0]
 	token := h.newToken()
-	h.savePending(token, pendingValidation{req: req, collision: top})
+	if err := h.store.Save(ctx, pendingValidation{
+		Token:     token,
+		ChatID:    chatID,
+		Request:   req,
+		Collision: top,
+		// Stamp the TTL on every prompt. Take and SweepExpired
+		// both honour this cutoff; without it the row would sit
+		// in the table until the human taps the button, which is
+		// the exact "abandoned prompt" case the TTL is meant to
+		// police.
+		ExpiresAt: time.Now().Add(app.PendingValidationTTL),
+	}); err != nil {
+		// Durability is best-effort. A save failure must never block
+		// ingestion — degrade to a direct save and let the human retry.
+		h.logger.Error("telegram pending validation save failed",
+			slog.Int64("chat_id", chatID),
+			slog.String("error", err.Error()))
+		return h.ingestAndReply(ctx, chatID, req)
+	}
 
 	rows := [][]InlineButton{{
 		{Text: "✅ Guardar igual", Data: "keep:" + token},
@@ -218,15 +263,26 @@ func (h *Handler) handleCallback(ctx context.Context, cb *models.CallbackQuery) 
 		messageID = cb.Message.Message.ID
 	}
 
-	pending, found := h.takePending(token)
-	if !found {
-		// Restart, double-tap, or expired entry. The source is untouched.
-		return h.sender.AnswerCallback(ctx, cb.ID, "Esta validación ya no está disponible")
+	pending, err := h.store.Take(ctx, token)
+	if err != nil {
+		if errors.Is(err, app.ErrNotFound) {
+			// Restart, double-tap, or expired entry. The source is untouched.
+			return h.sender.AnswerCallback(ctx, cb.ID, "Esta validación ya no está disponible")
+		}
+		// Storage layer is broken: answer gracefully and let the human retry
+		// rather than eating the callback silently. The store may or may not
+		// have committed the row, so we DO NOT edit the message: a retry
+		// with the same token could still succeed once the DB recovers.
+		h.logger.Error("telegram pending validation take failed",
+			slog.Int64("chat_id", chatID),
+			slog.String("token", token),
+			slog.String("error", err.Error()))
+		return h.sender.AnswerCallback(ctx, cb.ID, "Error temporal; probá de nuevo")
 	}
 
 	switch action {
 	case "keep":
-		result, err := h.service.Ingest(ctx, pending.req)
+		result, err := h.service.Ingest(ctx, pending.Request)
 		if err != nil {
 			h.logger.Error("telegram validated ingest failed",
 				slog.Int64("chat_id", chatID),
@@ -243,7 +299,7 @@ func (h *Handler) handleCallback(ctx context.Context, cb *models.CallbackQuery) 
 
 	case "discard":
 		_ = h.sender.EditMessageText(ctx, chatID, messageID,
-			"❌ Descartado. Ya estaba cubierto por:\n"+truncate(pending.collision.Object.Content, 120))
+			"❌ Descartado. Ya estaba cubierto por:\n"+truncate(pending.Collision.Object.Content, 120))
 		return h.sender.AnswerCallback(ctx, cb.ID, "Descartado")
 
 	default:
@@ -268,24 +324,6 @@ func (h *Handler) ingestAndReply(ctx context.Context, chatID int64, req domain.I
 		return h.sender.SendMessage(ctx, chatID, "Duplicate")
 	}
 	return h.sender.SendMessage(ctx, chatID, "Saved")
-}
-
-func (h *Handler) savePending(token string, p pendingValidation) {
-	h.mu.Lock()
-	h.pending[token] = p
-	h.mu.Unlock()
-}
-
-// takePending atomically loads and removes a pending entry so a button
-// can only be acted on once.
-func (h *Handler) takePending(token string) (pendingValidation, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	p, ok := h.pending[token]
-	if ok {
-		delete(h.pending, token)
-	}
-	return p, ok
 }
 
 // buildIngestRequest maps a Telegram message to an ingestion request.

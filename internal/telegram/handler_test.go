@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
-
 	"time"
 
 	"github.com/frankirova/project-brain/internal/app"
@@ -434,5 +434,178 @@ func TestDetectorErrorDegradesToIngest(t *testing.T) {
 	}
 	if len(sender.messages) != 1 || sender.messages[0].text != "Saved" {
 		t.Fatalf("expected degraded 'Saved', got %+v", sender.messages)
+	}
+}
+
+// fakePendingStore records Save/Take calls so we can assert the
+// handler uses the store abstraction instead of a hidden map.
+type fakePendingStore struct {
+	mu      sync.Mutex
+	saves   []app.PendingValidation
+	takes   []string
+	entries map[string]app.PendingValidation
+	// optional overrides
+	takeErr error
+	saveErr error
+}
+
+func newFakePendingStore() *fakePendingStore {
+	return &fakePendingStore{entries: make(map[string]app.PendingValidation)}
+}
+
+func (f *fakePendingStore) Save(_ context.Context, entry app.PendingValidation) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.saves = append(f.saves, entry)
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	f.entries[entry.Token] = entry
+	return nil
+}
+
+func (f *fakePendingStore) Take(_ context.Context, token string) (app.PendingValidation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.takes = append(f.takes, token)
+	if f.takeErr != nil {
+		return app.PendingValidation{}, f.takeErr
+	}
+	entry, ok := f.entries[token]
+	if !ok {
+		return app.PendingValidation{}, app.ErrNotFound
+	}
+	delete(f.entries, token)
+	// Match the real stores' TTL filter so the fake exercises the
+	// same expiry path the production stores will.
+	if !entry.ExpiresAt.IsZero() && !time.Now().Before(entry.ExpiresAt) {
+		return app.PendingValidation{}, app.ErrNotFound
+	}
+	return entry, nil
+}
+
+// The handler must persist the candidate through the store on
+// collision and consume it through the store on callback. This is the
+// "uses the abstraction, not a hidden map" contract.
+func TestHandlerUsesStoreAbstraction(t *testing.T) {
+	sender := &fakeSender{}
+	collision := sampleCollision()
+	det := &fakeDetector{collisions: []app.Collision{collision}}
+	store := newFakePendingStore()
+	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	handler := newHandlerWithStore(svc, det, sender, store, nil)
+	handler.newToken = func() string { return "tok123" }
+
+	if err := handler.ProcessUpdate(context.Background(), testUpdate("propongo Python")); err != nil {
+		t.Fatalf("prompt step: %v", err)
+	}
+	if len(store.saves) != 1 {
+		t.Fatalf("store saves = %d, want 1 (handler must persist on collision)", len(store.saves))
+	}
+	if store.saves[0].Token != "tok123" {
+		t.Errorf("saved token = %q, want tok123", store.saves[0].Token)
+	}
+	if store.saves[0].Collision.Object.ID != collision.Object.ID {
+		t.Errorf("saved collision = %+v, want detector output %+v", store.saves[0].Collision, collision)
+	}
+
+	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok123", 100, 555)); err != nil {
+		t.Fatalf("keep step: %v", err)
+	}
+	if len(store.takes) != 1 || store.takes[0] != "tok123" {
+		t.Errorf("store takes = %+v, want [tok123]", store.takes)
+	}
+	// The entry must be gone after Take so a retry would 404.
+	if _, ok := store.entries["tok123"]; ok {
+		t.Errorf("entry still present after Take: load-and-delete contract broken")
+	}
+}
+
+// A storage save failure must not block ingestion — degrade to a
+// direct save and never put a button on the wire.
+func TestHandlerDegradesOnStoreSaveError(t *testing.T) {
+	sender := &fakeSender{}
+	det := &fakeDetector{collisions: []app.Collision{sampleCollision()}}
+	store := newFakePendingStore()
+	store.saveErr = errors.New("postgres unreachable")
+	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	handler := newHandlerWithStore(svc, det, sender, store, nil)
+
+	if err := handler.ProcessUpdate(context.Background(), testUpdate("anything")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sender.prompts) != 0 {
+		t.Fatalf("storage failure must not prompt, got %d prompts", len(sender.prompts))
+	}
+	if len(sender.messages) != 1 || sender.messages[0].text != "Saved" {
+		t.Fatalf("expected degraded 'Saved', got %+v", sender.messages)
+	}
+	if len(store.saves) != 1 {
+		t.Fatalf("store should have been called once, got %d", len(store.saves))
+	}
+}
+
+// A storage Take error that is NOT ErrNotFound must not edit the
+// message (the row may still be in flight) and must answer the
+// callback with a transient error so the human can retry.
+func TestHandlerHandlesStoreTakeError(t *testing.T) {
+	sender := &fakeSender{}
+	det := &fakeDetector{collisions: []app.Collision{sampleCollision()}}
+	store := newFakePendingStore()
+	// pre-seed so Save succeeds and Take gets a chance to fail.
+	if err := store.Save(context.Background(), app.PendingValidation{Token: "tok123", ChatID: 100, Collision: sampleCollision()}); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+	store.takeErr = errors.New("postgres connection lost")
+	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	handler := newHandlerWithStore(svc, det, sender, store, nil)
+
+	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok123", 100, 555)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sender.edits) != 0 {
+		t.Fatalf("transient store error must not edit the message, got %+v", sender.edits)
+	}
+	if len(sender.answers) != 1 || !strings.Contains(sender.answers[0].text, "temporal") {
+		t.Fatalf("expected transient-error answer, got %+v", sender.answers)
+	}
+}
+
+// An entry whose ExpiresAt is already in the past must be reported as
+// "no longer available", the same way a never-saved token is. The
+// store's TTL filter makes the two cases indistinguishable to the
+// handler; this test pins that contract so a future regression in
+// either layer (handler or store) cannot quietly resurrect a stale
+// prompt.
+func TestHandlerExpiredEntryReportsUnavailable(t *testing.T) {
+	sender := &fakeSender{}
+	det := &fakeDetector{collisions: []app.Collision{sampleCollision()}}
+	store := newFakePendingStore()
+	// Seed an entry with a TTL already in the past; the handler will
+	// never see this token via its own Save path.
+	expired := app.PendingValidation{
+		Token:     "tok-stale",
+		ChatID:    100,
+		Collision: sampleCollision(),
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+	if err := store.Save(context.Background(), expired); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	handler := newHandlerWithStore(svc, det, sender, store, nil)
+
+	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok-stale", 100, 555)); err != nil {
+		t.Fatalf("callback: %v", err)
+	}
+	if len(sender.edits) != 0 {
+		t.Fatalf("expired entry must not edit the prompt, got %+v", sender.edits)
+	}
+	if len(sender.answers) != 1 || !strings.Contains(sender.answers[0].text, "disponible") {
+		t.Fatalf("expected 'no disponible' answer, got %+v", sender.answers)
 	}
 }

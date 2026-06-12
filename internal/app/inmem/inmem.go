@@ -9,6 +9,8 @@ package inmem
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
@@ -57,3 +59,53 @@ func (r *linkRepo) Create(_ context.Context, _ domain.ObjectSource) error { retu
 type auditRepo struct{}
 
 func (r *auditRepo) Create(_ context.Context, _ domain.AuditEvent) error { return nil }
+
+// PendingValidationStore is the in-memory implementation of
+// app.PendingValidationStore. It is the default for local development
+// and for runs without PostgreSQL — it preserves the pre-persistence
+// behavior of the Telegram handler (entries lost on restart, "no
+// longer available" on a stale button). In production main.go wires
+// the Postgres-backed implementation instead.
+type PendingValidationStore struct {
+	mu   sync.Mutex
+	data map[string]app.PendingValidation
+}
+
+// NewPendingValidationStore returns an empty in-memory store.
+func NewPendingValidationStore() *PendingValidationStore {
+	return &PendingValidationStore{data: make(map[string]app.PendingValidation)}
+}
+
+// Save stores entry keyed by entry.Token, overwriting any prior entry
+// for the same token. The handler generates a fresh UUID per prompt,
+// so collisions are not expected, but the overwrite keeps the
+// implementation total and simple.
+func (s *PendingValidationStore) Save(_ context.Context, entry app.PendingValidation) error {
+	s.mu.Lock()
+	s.data[entry.Token] = entry
+	s.mu.Unlock()
+	return nil
+}
+
+// Take atomically loads and removes the entry for token. Returns
+// app.ErrNotFound when the token is unknown, has already been
+// consumed, or has expired — a button can only be acted on once, and a
+// stale prompt must behave like "no longer available" rather than
+// resurrecting a forgotten input.
+func (s *PendingValidationStore) Take(_ context.Context, token string) (app.PendingValidation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.data[token]
+	if !ok {
+		return app.PendingValidation{}, app.ErrNotFound
+	}
+	delete(s.data, token)
+	// Expired entries look the same as missing ones to the handler:
+	// both end with "no longer available" and neither ingests.
+	if !entry.ExpiresAt.IsZero() && !time.Now().Before(entry.ExpiresAt) {
+		return app.PendingValidation{}, app.ErrNotFound
+	}
+	return entry, nil
+}
+
+var _ app.PendingValidationStore = (*PendingValidationStore)(nil)

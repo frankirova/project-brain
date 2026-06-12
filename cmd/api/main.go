@@ -178,14 +178,41 @@ func main() {
 	// Telegram bot: start polling only if token is configured.
 	var botWG sync.WaitGroup
 	if cfg.TelegramBotToken != "" {
+		// Pending validations are durable in PostgreSQL (so a restart does
+		// not invalidate every outstanding button) and fall back to the
+		// in-memory store when the DB is unavailable. The handler itself
+		// accepts nil and installs the fallback, but we wire the Postgres
+		// store explicitly when the DB is open to make the wiring
+		// observable here in the composition root.
+		// pgStore holds the concrete *postgres.PendingValidationStore so
+		// the composition root can also drive its SweepExpired GC pass on
+		// startup; the handler keeps depending on the interface only.
+		var tgStore app.PendingValidationStore
+		var pgStore *postgres.PendingValidationStore
+		if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
+			pgStore = postgres.NewPendingValidationStore(pgDB.Pool())
+			tgStore = pgStore
+			// Reap rows that expired since the previous run. Stale
+			// prompts are harmless to read (Take already filters
+			// them out) but they would keep the table growing across
+			// deploys, so the GC pass keeps the steady state small.
+			reaped, err := pgStore.SweepExpired(ctx)
+			if err != nil {
+				logger.Warn("telegram pending validation sweep failed",
+					slog.String("error", err.Error()))
+			} else if reaped > 0 {
+				logger.Info("telegram pending validation sweep reaped rows",
+					slog.Int64("count", reaped))
+			}
+		}
 		// Pass a true nil interface when no detector exists — handing a
 		// typed-nil *app.CollisionDetector would make the handler's nil
 		// check fail and panic on the first message.
 		var tgHandler *telegram.Handler
 		if collisionDetector != nil {
-			tgHandler = telegram.NewHandler(svc, collisionDetector, nil, logger)
+			tgHandler = telegram.NewHandlerWithStore(svc, collisionDetector, nil, logger, tgStore)
 		} else {
-			tgHandler = telegram.NewHandler(svc, nil, nil, logger)
+			tgHandler = telegram.NewHandlerWithStore(svc, nil, nil, logger, tgStore)
 		}
 		b, err := tgbot.New(cfg.TelegramBotToken,
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),

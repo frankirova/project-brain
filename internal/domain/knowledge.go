@@ -208,10 +208,10 @@ type ObjectInput struct {
 }
 
 type IngestTextRequest struct {
-	WorkspaceID string
-	Content     string
-	Source      SourceInput
-	Object      ObjectInput
+	WorkspaceID string      `json:"workspace_id"`
+	Content     string      `json:"content"`
+	Source      SourceInput `json:"source"`
+	Object      ObjectInput `json:"object"`
 }
 
 type IngestTextResult struct {
