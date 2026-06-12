@@ -111,6 +111,48 @@ const (
 	AuditActionRelationCreated            = "relation.created"
 )
 
+// Change 14 (human-loop-orchestrator) domain constants. The
+// audit-action constants are siblings of AuditActionKnowledgeStatusChanged
+// (defined above) and are emitted by ObjectDebateService (added in
+// PR 2+). The remaining constants are debate-specific enums and
+// time-window defaults consumed by the human-backlog query and the
+// derived stale marker. They live in domain so the app and postgres
+// layers share the same identifiers without circular imports.
+const (
+	// Audit actions emitted by ObjectDebateService.
+	AuditActionKnowledgeDebateOpened   = "knowledge.debate_opened"
+	AuditActionKnowledgeDebateResolved = "knowledge.debate_resolved"
+
+	// DebateTrigger discriminates who initiated a MarkDebating call.
+	// The transition itself is always a human decision — humans
+	// close the debate loop — but the suggestion can originate
+	// from the system (a bot detected a contradiction) or the
+	// human (an explicit caller action). Only "system" requires
+	// SuggestedBy to be set.
+	DebateTriggerSystem = "system"
+	DebateTriggerHuman  = "human"
+
+	// DebateSuggestion is the closed set of well-known system
+	// identifiers that may populate Metadata.suggested_by on a
+	// debate_opened audit row. The initial and only value tracks
+	// the contradiction detector. Presence is meaningful: the
+	// field is omitted iff the trigger was human-explicit.
+	DebateSuggestionContradictionDetector = "bot:contradiction-detector"
+
+	// BacklogRecentDeprecatedDays bounds how long a deprecated
+	// object stays visible in the human backlog after its last
+	// update. Matches DebateStaleDays on purpose: one mental
+	// number (14d) for both "stale debating" and "recently
+	// deprecated" recency.
+	BacklogRecentDeprecatedDays = 14
+
+	// DebateStaleDays is the read-time staleness threshold for
+	// objects in `debating` status. A debating object is marked
+	// is_stale once its updated_at is older than this window.
+	// Derived at read time; no auto-transition is performed.
+	DebateStaleDays = 14
+)
+
 // AuditTargetType enumerates the recognized audit target types.
 const (
 	AuditTargetKnowledgeObject = "knowledge_object"
