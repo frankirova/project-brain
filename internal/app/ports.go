@@ -20,6 +20,19 @@ type ObjectValidationUnitOfWork interface {
 	WithinObjectValidationTx(ctx context.Context, fn func(context.Context, ObjectValidationRepositories) error) error
 }
 
+// ObjectDebateUnitOfWork is the transactional boundary for the
+// human-loop-orchestrator write path. It mirrors the
+// ObjectValidationUnitOfWork shape but is a separate type so future
+// debate-specific repository methods (e.g., a future "lock" or
+// "audit-and-notify" method) can be added without leaking into the
+// validation UoW. The transaction is owned by the postgres layer
+// (see (*DB).WithinObjectDebateTx); the callback receives the
+// debate-scoped repository bundle and MUST return an error to
+// trigger rollback, or nil to commit.
+type ObjectDebateUnitOfWork interface {
+	WithinObjectDebateTx(ctx context.Context, fn func(context.Context, ObjectDebateRepositories) error) error
+}
+
 // IngestionRepositories bundles the four repository interfaces that
 // participate in a single ingestion transaction: Source, KnowledgeObject,
 // ObjectSource, and AuditEvent.
@@ -43,6 +56,34 @@ type ObjectValidationRepositories interface {
 }
 
 type ObjectValidationObjectRepository interface {
+	FindByIDForUpdate(ctx context.Context, workspaceID string, id uuid.UUID) (domain.KnowledgeObject, error)
+	UpdateStatus(ctx context.Context, workspaceID string, id uuid.UUID, status string) error
+}
+
+// ObjectDebateRepositories is the repository bundle passed to the
+// WithinObjectDebateTx callback. It deliberately mirrors the shape
+// of ObjectValidationRepositories (Objects + AuditEvents) but is a
+// distinct type so the debate service cannot accidentally pick up a
+// future method added only to the validation side.
+type ObjectDebateRepositories interface {
+	Objects() ObjectDebateObjectRepository
+	AuditEvents() AuditEventRepository
+}
+
+// ObjectDebateObjectRepository is the debate-scoped read+write
+// surface for knowledge_objects inside a WithinObjectDebateTx. The
+// service uses:
+//
+//   - FindByIDForUpdate to lock the row and read the current
+//     status (drives both the proposed→debating transition and the
+//     debating→{validated,deprecated} transition, plus the
+//     duplicate-detection branch of MarkDebating).
+//   - UpdateStatus to flip the row to the new status.
+//
+// Both methods are reused verbatim from the validation surface; the
+// debate interface is a separate type only to keep the two
+// services' method sets from drifting.
+type ObjectDebateObjectRepository interface {
 	FindByIDForUpdate(ctx context.Context, workspaceID string, id uuid.UUID) (domain.KnowledgeObject, error)
 	UpdateStatus(ctx context.Context, workspaceID string, id uuid.UUID, status string) error
 }
