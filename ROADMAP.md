@@ -190,8 +190,8 @@ Esto es lo que define `PROJECT_BRAIN.md` sección 8. Los agentes especializados 
 - ✅ `CompositeRetriever` con Reciprocal Rank Fusion (merge FTS + vector)
 - ✅ Hydration del composite (ObjectHydrator interface + FTSRetriever.FindByID)
 - ✅ `/v1/objects/{id}` endpoint
-- ⏳ Wire del composite en main.go con config flag (Embedder real pendiente)
-- ⏳ Tests integration del composite contra Postgres real
+- ✅ Wire del composite en main.go (Gemini key → hybrid; no key → FTS-only)
+- ✅ Integration tests del `vectorRetriever` + `EmbeddingRepo` contra Postgres real (`embeddings_integration_test.go`: 3 tests env-gated)
 
 **Fase 1 cerrado** con 5 cambios archived + **dos sprints de calidad** (slog, rate limit, auth, CI, .gitattributes, fix del test de relations + 25 commits del audit post-Fase 1).
 

@@ -1,6 +1,6 @@
 schema: spec-driven
 
-project: hermes-agents
+project: project-brain
 artifact_store:
   mode: openspec
 execution_mode: interactive
@@ -9,28 +9,28 @@ review_budget_lines: 400
 detected: 2026-06-09
 
 context: |
-  Tech stack: planning-only repository; PROJECT_BRAIN.md recommends Go, PostgreSQL, pgvector, PostgreSQL FTS, NATS, S3-compatible object storage, Telegram Bot API, OpenTelemetry, Prometheus/Grafana.
-  Architecture: event-driven multi-agent knowledge platform with PostgreSQL-first knowledge core, hybrid RAG, graph-like relations, auditable knowledge artifacts.
-  Testing: no code or test runner detected yet; strict TDD disabled until implementation stack is bootstrapped.
+  Tech stack: Go 1.25, PostgreSQL, pgvector, PostgreSQL FTS, Gemini embeddings, Telegram Bot API, MCP stdio tools, slog, and Docker-based deployment.
+  Architecture: hexagonal knowledge platform with domain/app/infra/adapters layers, PostgreSQL-first knowledge core, hybrid retrieval, graph-like relations, collision detection, and auditable knowledge artifacts.
+  Testing: Go unit tests are available via `go test ./...`; PostgreSQL integration tests are env-gated via `PROJECT_BRAIN_TEST_DATABASE_DSN`.
   Style: documentation-first SDD/OpenSpec workflow; Spanish product source document, English SDD artifacts unless requested otherwise.
 
 strict_tdd: false
 
 testing:
   strict_tdd: false
-  reason: "No codebase, package manifest, module file, CI workflow, or test runner detected."
+  reason: "Go codebase and test runner are available; strict TDD remains disabled until explicitly enabled for this project."
   detected_at: 2026-06-09
   runner:
-    available: false
-    framework: null
-    command: null
+    available: true
+    framework: go test
+    command: go test ./...
   layers:
     unit:
-      available: false
-      tool: null
+      available: true
+      tool: go test ./...
     integration:
-      available: false
-      tool: null
+      available: true
+      tool: PROJECT_BRAIN_TEST_DATABASE_DSN=<dsn> go test ./internal/postgres
     e2e:
       available: false
       tool: null
@@ -42,11 +42,11 @@ testing:
       available: false
       command: null
     type_checker:
-      available: false
-      command: null
+      available: true
+      command: go vet ./...
     formatter:
-      available: false
-      command: null
+      available: true
+      command: gofmt -w .
 
 rules:
   proposal:
@@ -64,10 +64,10 @@ rules:
   apply:
     - Follow existing code and documentation patterns.
     tdd: false
-    test_command: ""
+    test_command: "go test ./..."
   verify:
-    test_command: ""
-    build_command: ""
+    test_command: "go test ./..."
+    build_command: "go build ./cmd/api ./cmd/mcp"
     coverage_threshold: 0
   archive:
     - Preserve archived changes as audit trail; do not delete or rewrite archives.
