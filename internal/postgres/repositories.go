@@ -517,14 +517,14 @@ SELECT
   COALESCE(title, '') AS title,
   COALESCE(summary, '') AS summary,
   status, updated_at,
-  (status = 'debating' AND updated_at < now() - interval '14 days') AS is_stale,
+  (status = 'debating' AND updated_at < now() - ($6::int * interval '1 day')) AS is_stale,
   GREATEST(EXTRACT(DAY FROM (now() - updated_at))::int, 0)         AS stale_for_days
 FROM knowledge_objects
 WHERE workspace_id = $1
   AND (
     status = 'proposed'
     OR status = 'debating'
-    OR (status = 'deprecated' AND updated_at >= now() - interval '14 days')
+    OR (status = 'deprecated' AND updated_at >= now() - ($7::int * interval '1 day'))
   )
   AND (
     $2::boolean = false
@@ -539,6 +539,8 @@ LIMIT $5`
 		cursorUpdatedAt,
 		cursorID,
 		pageSize+1,
+		domain.DebateStaleDays,
+		domain.BacklogRecentDeprecatedDays,
 	)
 	if err != nil {
 		return app.BacklogPage{}, err

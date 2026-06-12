@@ -423,8 +423,8 @@ func TestListHumanBacklogPropagatesQueryError(t *testing.T) {
 func TestListHumanBacklogStaleMarkerComputation(t *testing.T) {
 	now := time.Date(2026, 6, 12, 15, 0, 0, 0, time.UTC)
 	items := []BacklogItem{
-		// Fresh debating: is_stale=false, stale_for_days=0.
-		backlogItemFixture(uuid.New(), domain.KnowledgeObjectStatusDebating, now.Add(-3*24*time.Hour), false, 0),
+		// Fresh debating: is_stale=false, stale_for_days=3.
+		backlogItemFixture(uuid.New(), domain.KnowledgeObjectStatusDebating, now.Add(-3*24*time.Hour), false, 3),
 		// Stale debating (20 days): is_stale=true, stale_for_days=20.
 		backlogItemFixture(uuid.New(), domain.KnowledgeObjectStatusDebating, now.Add(-20*24*time.Hour), true, 20),
 		// Proposed (is_stale is false by spec; the marker only fires for debating).
@@ -449,7 +449,7 @@ func TestListHumanBacklogStaleMarkerComputation(t *testing.T) {
 		isStale      bool
 		staleForDays int
 	}{
-		{false, 0},
+		{false, 3},
 		{true, 20},
 		{false, 0},
 		{false, 5},
