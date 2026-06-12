@@ -9,6 +9,7 @@ import (
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -125,6 +126,9 @@ WHERE workspace_id = $1 AND id = $2`
 		&obj.ProjectID, &obj.Tags, &obj.Confidence, &obj.Importance,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, app.ErrNotFound
+		}
 		return nil, err
 	}
 	return &obj, nil

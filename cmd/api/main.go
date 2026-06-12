@@ -79,6 +79,10 @@ func main() {
 	// can reuse it for the human-in-the-loop validation flow. Stays nil
 	// when vector search is off.
 	var collisionDetector *app.CollisionDetector
+	// retryDone is closed when the embedding retry worker goroutine
+	// exits. nil when the worker is not wired (in-memory mode or no
+	// Gemini key); shutdown blocks on it only when set.
+	var retryDone <-chan struct{}
 	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
 		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
 		objectHandler = httpapi.NewObjectHandler(ftsRetriever)
@@ -86,11 +90,14 @@ func main() {
 		if cfg.GeminiAPIKey != "" {
 			embedder := gemini.NewEmbedder(cfg.GeminiAPIKey)
 			embeddingRepo := postgres.NewEmbeddingRepo(pgDB.Pool())
+			embeddingJobs := postgres.NewEmbeddingJobRepo(pgDB.Pool())
 
-			// Write path: embed every new object after commit (best-effort).
-			// The hook runs outside the ingest transaction, so a Gemini
-			// outage degrades search recall but never blocks ingestion.
-			svc.SetPostIngestHook(app.NewEmbeddingHook(embedder, embeddingRepo))
+			// Write path: embed every new object after commit. The
+			// retry-aware hook stays best-effort for the ingest
+			// path (errors are logged, ingest succeeds) but enqueues
+			// a durable retry job on failure, so a Gemini outage no
+			// longer leaves the object silently vector-less.
+			svc.SetPostIngestHook(app.NewRetryAwareEmbeddingHook(embedder, embeddingRepo, embeddingJobs, logger))
 
 			// Read path: fuse FTS + vector with Reciprocal Rank Fusion. The
 			// FTS retriever doubles as the object hydrator for both paths.
@@ -108,6 +115,16 @@ func main() {
 				slog.String("provider", "gemini"),
 				slog.String("model", embedder.Model()),
 				slog.Int("dimensions", embedder.Dimensions()))
+
+			// Background drain of the embedding retry queue. Reuses
+			// the same FTSRetriever for object hydration on each
+			// retry. The goroutine exits when ctx is cancelled by
+			// the shutdown handler below.
+			retryService := app.NewEmbeddingRetryService(
+				embedder, embeddingRepo, embeddingJobs, ftsRetriever,
+				logger, time.Now, 0,
+			)
+			retryDone = retryService.Start(ctx, 0)
 		} else {
 			searchHandler = httpapi.NewSearchHandler(ftsRetriever)
 			logger.Info("search enabled (fts only)",
@@ -253,6 +270,18 @@ func main() {
 		logger.Info("telegram bot goroutine joined")
 	case <-time.After(cfg.ShutdownTimeout()):
 		logger.Warn("telegram bot goroutine did not exit before shutdown timeout")
+	}
+
+	// Wait for the embedding retry worker to drain. It only exists
+	// when Postgres + Gemini are both wired; otherwise retryDone is
+	// nil and the select short-circuits.
+	if retryDone != nil {
+		select {
+		case <-retryDone:
+			logger.Info("embedding retry worker joined")
+		case <-time.After(cfg.ShutdownTimeout()):
+			logger.Warn("embedding retry worker did not exit before shutdown timeout")
+		}
 	}
 
 	dbCloser()
