@@ -25,6 +25,20 @@ type objectValidationRepositories struct {
 	auditEvents *auditEventRepository
 }
 
+// debateRepositories is the bundle handed to a
+// WithinObjectDebateTx callback. It deliberately mirrors
+// objectValidationRepositories' shape (Objects + AuditEvents) but
+// is a distinct type so the debate service cannot accidentally pick
+// up a future method added only to the validation side. The
+// underlying repository structs (knowledgeObjectRepository,
+// auditEventRepository) are reused by value composition — the
+// debate bundle does NOT introduce a parallel set of write-path
+// repository structs.
+type debateRepositories struct {
+	objects     *knowledgeObjectRepository
+	auditEvents *auditEventRepository
+}
+
 func newRepositories(tx pgx.Tx) *repositories {
 	return &repositories{
 		sources:          &sourceRepository{tx: tx},
@@ -41,6 +55,13 @@ func newObjectValidationRepositories(tx pgx.Tx) *objectValidationRepositories {
 	}
 }
 
+func newDebateRepositories(tx pgx.Tx) *debateRepositories {
+	return &debateRepositories{
+		objects:     &knowledgeObjectRepository{tx: tx},
+		auditEvents: &auditEventRepository{tx: tx},
+	}
+}
+
 func (r *repositories) Sources() app.SourceRepository                   { return r.sources }
 func (r *repositories) KnowledgeObjects() app.KnowledgeObjectRepository { return r.knowledgeObjects }
 func (r *repositories) ObjectSources() app.ObjectSourceRepository       { return r.objectSources }
@@ -50,6 +71,9 @@ func (r *objectValidationRepositories) Objects() app.ObjectValidationObjectRepos
 	return r.objects
 }
 func (r *objectValidationRepositories) AuditEvents() app.AuditEventRepository { return r.auditEvents }
+
+func (r *debateRepositories) Objects() app.ObjectDebateObjectRepository { return r.objects }
+func (r *debateRepositories) AuditEvents() app.AuditEventRepository     { return r.auditEvents }
 
 // Relations returns a standalone RelationRepository backed by its own connection.
 func (db *DB) Relations() app.RelationRepository {
@@ -290,10 +314,12 @@ func nullableInt(value *int) *int {
 var _ app.SourceRepository = (*sourceRepository)(nil)
 var _ app.KnowledgeObjectRepository = (*knowledgeObjectRepository)(nil)
 var _ app.ObjectValidationObjectRepository = (*knowledgeObjectRepository)(nil)
+var _ app.ObjectDebateObjectRepository = (*knowledgeObjectRepository)(nil)
 var _ app.ObjectSourceRepository = (*objectSourceRepository)(nil)
 var _ app.AuditEventRepository = (*auditEventRepository)(nil)
 var _ app.IngestionRepositories = (*repositories)(nil)
 var _ app.ObjectValidationRepositories = (*objectValidationRepositories)(nil)
+var _ app.ObjectDebateRepositories = (*debateRepositories)(nil)
 var _ app.RelationRepository = (*relationRepository)(nil)
 
 // relationRepository is a standalone repository for typed directed edges.

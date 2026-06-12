@@ -109,3 +109,40 @@ func (db *DB) WithinObjectValidationTx(ctx context.Context, fn func(context.Cont
 	}
 	return nil
 }
+
+// WithinObjectDebateTx is the transactional boundary for the
+// human-loop-orchestrator write path. It is a literal mirror of
+// WithinObjectValidationTx: BeginTx → fn(repos) → Commit on nil
+// or Rollback on error. The debate bundle is composed of the same
+// underlying repository structs (knowledgeObjectRepository,
+// auditEventRepository) but is exposed as a separate type so
+// future debate-specific repository methods can be added without
+// affecting the validation bundle. Status update + audit insert
+// MUST happen inside the same callback; audit failure rolls back
+// the status change.
+func (db *DB) WithinObjectDebateTx(ctx context.Context, fn func(context.Context, app.ObjectDebateRepositories) error) error {
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		db.logger.Error("begin object debate tx failed", slog.String("error", err.Error()))
+		return err
+	}
+
+	repos := newDebateRepositories(tx)
+	if err := fn(ctx, repos); err != nil {
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			db.logger.Error("object debate rollback failed",
+				slog.String("tx_error", err.Error()),
+				slog.String("rollback_error", rollbackErr.Error()))
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		db.logger.Error("object debate commit failed",
+			slog.String("error", commitErr.Error()))
+		return commitErr
+	}
+	return nil
+}
