@@ -170,7 +170,7 @@ Ver `ROADMAP.md` para el plan completo (Fase 2: Hybrid RAG, Fase 3: Human-in-the
 
 ## Stack
 
-- **Go 1.22** — backend, workers, todo el código
+- **Go 1.25** — backend, workers, todo el código
 - **PostgreSQL 16** (con pgvector) — base principal, FTS, transacciones, JSONB
 - **pgx/v5** — driver Postgres (zero-dependency friendly)
 - **go-telegram/bot** — librería de Telegram (zero deps, polling + webhook)
