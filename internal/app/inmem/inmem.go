@@ -109,3 +109,67 @@ func (s *PendingValidationStore) Take(_ context.Context, token string) (app.Pend
 }
 
 var _ app.PendingValidationStore = (*PendingValidationStore)(nil)
+
+// TelegramReviewActionStore is the in-memory implementation of
+// app.TelegramReviewActionStore. It mirrors the Postgres store contract
+// for local development and handler tests: tokens are per-process,
+// single-use, and expired actions fail closed as ErrNotFound.
+type TelegramReviewActionStore struct {
+	mu   sync.Mutex
+	data map[string]app.TelegramReviewAction
+}
+
+// NewTelegramReviewActionStore returns an empty in-memory store for
+// Telegram backlog review actions.
+func NewTelegramReviewActionStore() *TelegramReviewActionStore {
+	return &TelegramReviewActionStore{data: make(map[string]app.TelegramReviewAction)}
+}
+
+// Save stores action keyed by action.Token, overwriting any prior action
+// with the same token. Token generation is the caller's responsibility;
+// overwrite keeps the store total and matches the pending-validation
+// store's defensive behavior.
+func (s *TelegramReviewActionStore) Save(_ context.Context, action app.TelegramReviewAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if action.CreatedAt.IsZero() {
+		action.CreatedAt = time.Now().UTC()
+	}
+	s.data[action.Token] = action
+	return nil
+}
+
+// Take atomically loads and removes the action for token. Unknown,
+// consumed, and expired tokens all return app.ErrNotFound so future
+// Telegram callback handling can answer with a safe refresh message.
+func (s *TelegramReviewActionStore) Take(_ context.Context, token string) (app.TelegramReviewAction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	action, ok := s.data[token]
+	if !ok {
+		return app.TelegramReviewAction{}, app.ErrNotFound
+	}
+	delete(s.data, token)
+	if !action.ExpiresAt.IsZero() && !time.Now().Before(action.ExpiresAt) {
+		return app.TelegramReviewAction{}, app.ErrNotFound
+	}
+	return action, nil
+}
+
+// SweepExpired removes expired review actions and returns the number
+// deleted. Zero ExpiresAt means "no expiry" and is left untouched.
+func (s *TelegramReviewActionStore) SweepExpired(_ context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	var removed int64
+	for token, action := range s.data {
+		if !action.ExpiresAt.IsZero() && !now.Before(action.ExpiresAt) {
+			delete(s.data, token)
+			removed++
+		}
+	}
+	return removed, nil
+}
+
+var _ app.TelegramReviewActionStore = (*TelegramReviewActionStore)(nil)

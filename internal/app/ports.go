@@ -123,6 +123,63 @@ type RelationRepository interface {
 // by setting PendingValidation.ExpiresAt explicitly.
 const PendingValidationTTL = 24 * time.Hour
 
+// TelegramReviewActionTTL bounds how long a rendered Telegram review
+// action button may remain actionable. It intentionally mirrors the
+// collision-validation TTL: old inline keyboards should fail closed and
+// ask the user to refresh instead of mutating lifecycle state long after
+// the backlog card was rendered.
+const TelegramReviewActionTTL = 24 * time.Hour
+
+const (
+	TelegramReviewActionValidate  = "validate"
+	TelegramReviewActionDeprecate = "deprecate"
+	TelegramReviewActionDebate    = "debate"
+	TelegramReviewActionSkip      = "skip"
+)
+
+// TelegramReviewAction is the server-side context behind an opaque
+// Telegram callback payload (`rv:<token>`). The callback payload carries
+// only Token; every trusted field needed by future Telegram rendering and
+// callback handling is loaded from this store.
+//
+// ActorID is the Telegram user ID that the action was created for and
+// ChatID scopes the button to the originating chat. WorkspaceID is kept
+// explicit even though the MVP uses "default" so later multi-workspace
+// mapping does not have to change the store contract. ExpectedStatus lets
+// callback handling detect stale buttons before calling lifecycle services.
+// NextCursor is used by future Skip/Next rendering and is intentionally
+// opaque to the store.
+type TelegramReviewAction struct {
+	Token          string
+	WorkspaceID    string
+	ActorID        int64
+	ChatID         int64
+	ObjectID       uuid.UUID
+	Action         string
+	ExpectedStatus string
+	NextCursor     string
+	CreatedAt      time.Time
+	ExpiresAt      time.Time
+}
+
+// TelegramReviewActionStore is the durability boundary for Telegram
+// backlog review buttons. Implementations MUST guarantee:
+//
+//   - Save followed by Take for the same token returns the same action
+//     and then app.ErrNotFound on any subsequent Take.
+//   - Take for an unknown, expired, or already-consumed token returns
+//     app.ErrNotFound.
+//   - SweepExpired deletes expired rows and returns the number removed.
+//
+// The store deliberately does not interpret Action or ExpectedStatus;
+// those are adapter/app concerns in later PRs. This PR only establishes
+// opaque-token persistence, TTL, and single-use semantics.
+type TelegramReviewActionStore interface {
+	Save(ctx context.Context, action TelegramReviewAction) error
+	Take(ctx context.Context, token string) (TelegramReviewAction, error)
+	SweepExpired(ctx context.Context) (int64, error)
+}
+
 // PendingValidation is a candidate input awaiting a human decision
 // after a collision was detected. The token is the short string carried
 // in Telegram's callback data; the request is the full ingest payload
