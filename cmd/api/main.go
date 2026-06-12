@@ -75,6 +75,10 @@ func main() {
 	var searchHandler http.Handler
 	var objectHandler http.Handler
 	var collisionHandler http.Handler
+	// backlogHandler is the human-loop-orchestrator (change 14, PR 3)
+	// read path. Wired only when a Postgres backend is available so
+	// the in-memory UoW fallback does not silently serve empty pages.
+	var backlogHandler http.Handler
 	// collisionDetector is hoisted so the Telegram handler (built later)
 	// can reuse it for the human-in-the-loop validation flow. Stays nil
 	// when vector search is off.
@@ -86,6 +90,15 @@ func main() {
 	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
 		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
 		objectHandler = httpapi.NewObjectHandler(ftsRetriever)
+
+		// Human backlog read path (change 14, PR 3). The query is
+		// pool-backed; the service is wired in the same block so the
+		// in-memory UoW branch (below) does not get a half-built
+		// service. BacklogHandler is built unconditionally inside
+		// the postgres branch because the service depends on the
+		// pool even when there is no Gemini key.
+		backlogSvc := app.NewObjectDebateService(pgDB, postgres.NewBacklogQuery(pgDB.Pool()))
+		backlogHandler = httpapi.NewBacklogHandler(backlogSvc)
 
 		if cfg.GeminiAPIKey != "" {
 			embedder := gemini.NewEmbedder(cfg.GeminiAPIKey)
@@ -152,6 +165,9 @@ func main() {
 	}
 	if collisionHandler != nil {
 		protectedMux.Handle("POST /v1/check-collision", collisionHandler)
+	}
+	if backlogHandler != nil {
+		protectedMux.Handle("GET /v1/backlog", backlogHandler)
 	}
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)

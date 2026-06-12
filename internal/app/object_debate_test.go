@@ -35,7 +35,7 @@ func TestMarkDebatingHumanExplicitHappyPath(t *testing.T) {
 		WorkspaceID: "workspace-1",
 		Status:      domain.KnowledgeObjectStatusProposed,
 	})
-	service := NewObjectDebateServiceWithDependencies(uow, auditIDGen, func() time.Time { return now })
+	service := NewObjectDebateServiceWithDependencies(uow, nil, auditIDGen, func() time.Time { return now })
 
 	result, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 		WorkspaceID: " Workspace-1 ",
@@ -140,7 +140,7 @@ func TestMarkDebatingSystemSuggestedHappyPath(t *testing.T) {
 		WorkspaceID: "workspace-1",
 		Status:      domain.KnowledgeObjectStatusProposed,
 	})
-	service := NewObjectDebateServiceWithDependencies(uow, auditIDGen, func() time.Time { return now })
+	service := NewObjectDebateServiceWithDependencies(uow, nil, auditIDGen, func() time.Time { return now })
 
 	result, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 		WorkspaceID: "workspace-1",
@@ -192,7 +192,7 @@ func TestMarkDebatingIdempotentOnDebatingSource(t *testing.T) {
 		WorkspaceID: "workspace-1",
 		Status:      domain.KnowledgeObjectStatusDebating,
 	})
-	service := NewObjectDebateServiceWithDependencies(uow, func() uuid.UUID { return auditID }, func() time.Time { return now })
+	service := NewObjectDebateServiceWithDependencies(uow, nil, func() uuid.UUID { return auditID }, func() time.Time { return now })
 
 	result, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 		WorkspaceID: "workspace-1",
@@ -256,7 +256,7 @@ func TestMarkDebatingRejectsNonProposedSources(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			uow := newFakeDebateUOW(domain.KnowledgeObject{Status: tt.status})
-			service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+			service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 			_, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 				WorkspaceID: "workspace-1",
@@ -296,7 +296,7 @@ func TestMarkDebatingRejectsInvalidTrigger(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			uow := newFakeDebateUOW(domain.KnowledgeObject{Status: domain.KnowledgeObjectStatusProposed})
-			service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+			service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 			_, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 				WorkspaceID: "workspace-1",
@@ -320,7 +320,7 @@ func TestMarkDebatingRejectsInvalidTrigger(t *testing.T) {
 func TestMarkDebatingNotFound(t *testing.T) {
 	uow := newFakeDebateUOW(domain.KnowledgeObject{})
 	uow.repos.object.findErr = ErrNotFound
-	service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 	_, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 		WorkspaceID: "workspace-1",
@@ -350,7 +350,7 @@ func TestMarkDebatingRollsBackWhenAuditFails(t *testing.T) {
 		Status:      domain.KnowledgeObjectStatusProposed,
 	})
 	uow.repos.audit.err = failure
-	service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 	_, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 		WorkspaceID: "workspace-1",
@@ -412,7 +412,7 @@ func TestMarkDebatingDualInitiatorProducesSameEndState(t *testing.T) {
 				WorkspaceID: "workspace-1",
 				Status:      domain.KnowledgeObjectStatusProposed,
 			})
-			service := NewObjectDebateServiceWithDependencies(uow, auditIDGen, func() time.Time { return now })
+			service := NewObjectDebateServiceWithDependencies(uow, nil, auditIDGen, func() time.Time { return now })
 
 			result, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 				WorkspaceID: "workspace-1",
@@ -484,7 +484,7 @@ func TestResolveDebateHappyPath(t *testing.T) {
 				WorkspaceID: "workspace-1",
 				Status:      domain.KnowledgeObjectStatusDebating,
 			})
-			service := NewObjectDebateServiceWithDependencies(uow, auditIDGen, func() time.Time { return now })
+			service := NewObjectDebateServiceWithDependencies(uow, nil, auditIDGen, func() time.Time { return now })
 
 			result, err := service.ResolveDebate(context.Background(), ResolveDebateRequest{
 				WorkspaceID:  "workspace-1",
@@ -556,7 +556,7 @@ func TestResolveDebateRejectsInvalidTargets(t *testing.T) {
 	} {
 		t.Run("target "+target, func(t *testing.T) {
 			uow := newFakeDebateUOW(domain.KnowledgeObject{Status: domain.KnowledgeObjectStatusDebating})
-			service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+			service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 			_, err := service.ResolveDebate(context.Background(), ResolveDebateRequest{
 				WorkspaceID:  "workspace-1",
@@ -590,7 +590,7 @@ func TestResolveDebateRejectsNonDebatingSource(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			uow := newFakeDebateUOW(domain.KnowledgeObject{Status: tt.status})
-			service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+			service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 			_, err := service.ResolveDebate(context.Background(), ResolveDebateRequest{
 				WorkspaceID:  "workspace-1",
@@ -616,7 +616,7 @@ func TestResolveDebateRejectsNonDebatingSource(t *testing.T) {
 func TestResolveDebateNotFound(t *testing.T) {
 	uow := newFakeDebateUOW(domain.KnowledgeObject{Status: domain.KnowledgeObjectStatusDebating})
 	uow.repos.object.findErr = ErrNotFound
-	service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 	_, err := service.ResolveDebate(context.Background(), ResolveDebateRequest{
 		WorkspaceID:  "workspace-1",
@@ -645,7 +645,7 @@ func TestResolveDebateRollsBackWhenAuditFails(t *testing.T) {
 		Status:      domain.KnowledgeObjectStatusDebating,
 	})
 	uow.repos.audit.err = failure
-	service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 	_, err := service.ResolveDebate(context.Background(), ResolveDebateRequest{
 		WorkspaceID:  "workspace-1",
@@ -876,7 +876,7 @@ func TestMarkDebatingNormalizesWorkspaceID(t *testing.T) {
 		WorkspaceID: "workspace-1",
 		Status:      domain.KnowledgeObjectStatusProposed,
 	})
-	service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 	_, err := service.MarkDebating(context.Background(), MarkDebatingRequest{
 		WorkspaceID: "  Workspace-1  ",
@@ -906,7 +906,7 @@ func TestResolveDebateNormalizesWorkspaceID(t *testing.T) {
 		WorkspaceID: "workspace-1",
 		Status:      domain.KnowledgeObjectStatusDebating,
 	})
-	service := NewObjectDebateServiceWithDependencies(uow, uuid.New, time.Now)
+	service := NewObjectDebateServiceWithDependencies(uow, nil, uuid.New, time.Now)
 
 	_, err := service.ResolveDebate(context.Background(), ResolveDebateRequest{
 		WorkspaceID:  "  Workspace-1  ",
