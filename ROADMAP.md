@@ -110,8 +110,8 @@ Esta es la fase donde Project Brain deja de ser "lugar para tirar notas" y se co
 
 | Tabla | Propósito | Estado |
 |-------|-----------|--------|
-| `raw_inputs` | Todo lo que entra por Telegram (texto, links, transcripciones). No perder nunca el input crudo. | No existe |
-| `knowledge_nodes` | Conceptos ya digeridos. Cada nodo tiene estado: `proposed`, `debating`, `validated`, `deprecated`. | Parcial (hoy es `knowledge_objects` con status libre) |
+| `raw_inputs` | Todo lo que entra por Telegram (texto, links, transcripciones). No perder nunca el input crudo. | Existe (`raw-inputs-table` archived) |
+| `knowledge_nodes` | Conceptos ya digeridos. Cada nodo tiene estado: `proposed`, `debating`, `validated`, `deprecated`. | Parcial: `knowledge_objects` soporta validación/rechazo (`proposed → validated/deprecated`); `debating` pendiente |
 | `sdd_documents` | Documento maestro consolidado. Se actualiza cuando nodos pasan a `validated`. | No existe |
 
 ### Decisión pendiente: cuarentena vs prioridad en conflictos
@@ -130,11 +130,11 @@ Cuando dos personas mandan ideas contradictorias sobre el mismo proyecto, ¿qué
 
 | # | Cambio | Capacidad | Esfuerzo | Estado |
 |---|--------|-----------|----------|--------|
-| 10 | `raw-inputs-table` | `raw-input-capture` | Low | Backlog |
-| 11 | `knowledge-states` | `node-lifecycle` (máquina de estados proposed → debating → validated) | Medium | Backlog |
-| 12 | `telegram-validation-ui` | `telegram-inline-keyboards` (botones de validar/debatir/descartar) | Low | Backlog |
+| 10 | `raw-inputs-table` | `raw-input-capture` | Low | ✅ Archived |
+| 12 | `knowledge-states` | `node-lifecycle` (`proposed → validated`, `proposed → deprecated`) | Medium | ✅ Archived |
 | 13 | `sdd-documents` | `consolidated-sdd` (documento maestro actualizado por nodos validados) | High | Backlog |
-| 14 | `human-loop-orchestrator` | `validation-workflow` (orquesta el bucle bot → humano → commit) | High | Backlog |
+| 14 | `human-loop-orchestrator` | `validation-workflow` (diseña `debating` y orquesta bot → humano → commit) | High | Backlog |
+| 15 | `telegram-validation-ui` | `telegram-inline-keyboards` (botones de validar/debatir/descartar) | Low | Backlog |
 
 ### Por qué NO empezar por acá todavía
 

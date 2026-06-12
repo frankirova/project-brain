@@ -109,43 +109,46 @@ type pendingStore = app.PendingValidationStore
 // Handler processes Telegram updates and routes them to the ingestion
 // service, gated by collision detection + human validation.
 type Handler struct {
-	service  *app.IngestTextService
-	detector collisionChecker // nil => legacy direct-ingest, no validation
-	sender   Sender
-	store    pendingStore // nil => in-memory fallback (local dev)
-	logger   *slog.Logger
-	newToken func() string
+	service    *app.IngestTextService
+	detector   collisionChecker       // nil => legacy direct-ingest, no validation
+	rawInputs  app.RawInputRepository // nil => raw_input staging disabled (no postgres)
+	sender     Sender
+	store      pendingStore // nil => in-memory fallback (local dev)
+	logger     *slog.Logger
+	newToken   func() string
 }
 
 // NewHandler creates a Handler that sends responses via the given bot
 // and stores pending validations in memory. Use NewHandlerWithStore to
 // plug in a durable (e.g. PostgreSQL) store. detector may be nil
-// (disables collision validation; falls back to direct ingestion). b
-// may be nil — the bot is wired lazily by DefaultHandler when the
+// (disables collision validation; falls back to direct ingestion).
+// rawInputs may be nil (disables raw_input staging; local dev / no postgres).
+// b may be nil — the bot is wired lazily by DefaultHandler when the
 // first update arrives. logger falls back to slog.Default() when nil.
-func NewHandler(svc *app.IngestTextService, detector collisionChecker, b *bot.Bot, logger *slog.Logger) *Handler {
-	return newHandlerWithStore(svc, detector, &telegramSender{b: b}, nil, logger)
+func NewHandler(svc *app.IngestTextService, detector collisionChecker, rawInputs app.RawInputRepository, b *bot.Bot, logger *slog.Logger) *Handler {
+	return newHandlerWithStore(svc, detector, rawInputs, &telegramSender{b: b}, nil, logger)
 }
 
 // NewHandlerWithStore is like NewHandler but lets the caller wire a
-// durable PendingValidationStore. Pass nil to fall back to the
+// durable PendingValidationStore. Pass nil store to fall back to the
 // in-memory store (same as NewHandler). The composition root in
 // cmd/api/main.go passes the Postgres-backed store when the database
 // is available.
-func NewHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, b *bot.Bot, logger *slog.Logger, store pendingStore) *Handler {
-	return newHandlerWithStore(svc, detector, &telegramSender{b: b}, store, logger)
+func NewHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, rawInputs app.RawInputRepository, b *bot.Bot, logger *slog.Logger, store pendingStore) *Handler {
+	return newHandlerWithStore(svc, detector, rawInputs, &telegramSender{b: b}, store, logger)
 }
 
 // newHandlerWithSender is the test seam: inject a Sender and a nil
 // store so existing tests run against the in-memory fallback.
 func newHandlerWithSender(svc *app.IngestTextService, detector collisionChecker, sender Sender, logger *slog.Logger) *Handler {
-	return newHandlerWithStore(svc, detector, sender, nil, logger)
+	return newHandlerWithStore(svc, detector, nil, sender, nil, logger)
 }
 
 // newHandlerWithStore is the single composition seam. store==nil
 // installs the in-memory fallback so local dev and the existing test
-// suite keep working without a database.
-func newHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, sender Sender, store pendingStore, logger *slog.Logger) *Handler {
+// suite keep working without a database. rawInputs==nil disables
+// raw_input staging (used in local dev and unit tests).
+func newHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, rawInputs app.RawInputRepository, sender Sender, store pendingStore, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -153,12 +156,13 @@ func newHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, 
 		store = inmem.NewPendingValidationStore()
 	}
 	return &Handler{
-		service:  svc,
-		detector: detector,
-		sender:   sender,
-		store:    store,
-		logger:   logger,
-		newToken: func() string { return uuid.NewString() },
+		service:   svc,
+		detector:  detector,
+		rawInputs: rawInputs,
+		sender:    sender,
+		store:     store,
+		logger:    logger,
+		newToken:  func() string { return uuid.NewString() },
 	}
 }
 
@@ -200,9 +204,38 @@ func (h *Handler) handleMessage(ctx context.Context, update *models.Update) erro
 	chatID := msg.Chat.ID
 	req := buildIngestRequest(msg)
 
+	// TASK-07: Write-first raw_input staging (REQ-05).
+	// Create the raw_input row before any collision check or ingest so
+	// every message that enters the system is captured. Failure here is
+	// logged at ERROR and the handler degrades to normal behavior —
+	// collision detection and ingest still run.
+	rawInputID := uuid.New()
+	if h.rawInputs != nil {
+		actorID := strconv.FormatInt(msg.From.ID, 10)
+		ri := domain.RawInput{
+			ID:          rawInputID,
+			WorkspaceID: req.WorkspaceID,
+			Channel:     domain.RawInputChannelTelegram,
+			Content:     msg.Text,
+			ActorID:     actorID,
+			ExternalRef: domain.Metadata{
+				"chat_id":    msg.Chat.ID,
+				"message_id": strconv.Itoa(msg.ID),
+			},
+			Status: domain.RawInputStatusPending,
+		}
+		if err := h.rawInputs.Create(ctx, ri); err != nil {
+			h.logger.Error("raw_input create failed, continuing without staging",
+				slog.Int64("chat_id", chatID),
+				slog.String("error", err.Error()))
+			// Reset so promote/discard guards see a zero UUID and skip.
+			rawInputID = uuid.Nil
+		}
+	}
+
 	// No detector configured (no embeddings): keep the original behaviour.
 	if h.detector == nil {
-		return h.ingestAndReply(ctx, chatID, req)
+		return h.ingestAndReplyWithRawInput(ctx, chatID, req, rawInputID)
 	}
 
 	collisions, err := h.detector.Detect(ctx, req.WorkspaceID, req.Content, nil)
@@ -212,20 +245,37 @@ func (h *Handler) handleMessage(ctx context.Context, update *models.Update) erro
 		h.logger.Warn("collision check failed, ingesting without validation",
 			slog.Int64("chat_id", chatID),
 			slog.String("error", err.Error()))
-		return h.ingestAndReply(ctx, chatID, req)
+		return h.ingestAndReplyWithRawInput(ctx, chatID, req, rawInputID)
 	}
 	if len(collisions) == 0 {
-		return h.ingestAndReply(ctx, chatID, req)
+		return h.ingestAndReplyWithRawInput(ctx, chatID, req, rawInputID)
 	}
 
-	// Collision detected: ask the human before this becomes canonical.
+	// Collision detected: update collision_summary before sending the
+	// keyboard (REQ-06). Best-effort: failure does not block the prompt.
 	top := collisions[0]
+	if h.rawInputs != nil && rawInputID != uuid.Nil {
+		summary := domain.Metadata{
+			"verdict":         top.Verdict,
+			"similarity":      top.Similarity,
+			"object_id":       top.Object.ID.String(),
+			"content_preview": truncate(top.Object.Content, 200),
+		}
+		if err := h.rawInputs.SetCollisionSummary(ctx, rawInputID, summary); err != nil {
+			h.logger.Warn("raw_input set_collision_summary failed",
+				slog.String("raw_input_id", rawInputID.String()),
+				slog.String("error", err.Error()))
+		}
+	}
+
+	// Ask the human before this becomes canonical.
 	token := h.newToken()
 	if err := h.store.Save(ctx, pendingValidation{
-		Token:     token,
-		ChatID:    chatID,
-		Request:   req,
-		Collision: top,
+		Token:      token,
+		ChatID:     chatID,
+		Request:    req,
+		Collision:  top,
+		RawInputID: rawInputID,
 		// Stamp the TTL on every prompt. Take and SweepExpired
 		// both honour this cutoff; without it the row would sit
 		// in the table until the human taps the button, which is
@@ -238,7 +288,7 @@ func (h *Handler) handleMessage(ctx context.Context, update *models.Update) erro
 		h.logger.Error("telegram pending validation save failed",
 			slog.Int64("chat_id", chatID),
 			slog.String("error", err.Error()))
-		return h.ingestAndReply(ctx, chatID, req)
+		return h.ingestAndReplyWithRawInput(ctx, chatID, req, rawInputID)
 	}
 
 	rows := [][]InlineButton{{
@@ -290,6 +340,14 @@ func (h *Handler) handleCallback(ctx context.Context, cb *models.CallbackQuery) 
 			_ = h.sender.EditMessageText(ctx, chatID, messageID, "⚠️ No se pudo guardar. Probá de nuevo.")
 			return h.sender.AnswerCallback(ctx, cb.ID, "Error al guardar")
 		}
+		// Best-effort promotion of the raw_input (REQ-08).
+		if h.rawInputs != nil && pending.RawInputID != uuid.Nil {
+			if err := h.rawInputs.SetPromoted(ctx, pending.RawInputID, result.ObjectID); err != nil {
+				h.logger.Warn("raw_input set_promoted failed (keep callback)",
+					slog.String("raw_input_id", pending.RawInputID.String()),
+					slog.String("error", err.Error()))
+			}
+		}
 		verb := "Guardado"
 		if result.Duplicate {
 			verb = "Ya estaba guardado"
@@ -298,6 +356,15 @@ func (h *Handler) handleCallback(ctx context.Context, cb *models.CallbackQuery) 
 		return h.sender.AnswerCallback(ctx, cb.ID, verb)
 
 	case "discard":
+		// Best-effort discard of the raw_input (REQ-09).
+		// If RawInputID is the zero UUID (pre-migration record), skip silently (S-08).
+		if h.rawInputs != nil && pending.RawInputID != uuid.Nil {
+			if err := h.rawInputs.SetDiscarded(ctx, pending.RawInputID); err != nil {
+				h.logger.Warn("raw_input set_discarded failed",
+					slog.String("raw_input_id", pending.RawInputID.String()),
+					slog.String("error", err.Error()))
+			}
+		}
 		_ = h.sender.EditMessageText(ctx, chatID, messageID,
 			"❌ Descartado. Ya estaba cubierto por:\n"+truncate(pending.Collision.Object.Content, 120))
 		return h.sender.AnswerCallback(ctx, cb.ID, "Descartado")
@@ -307,8 +374,11 @@ func (h *Handler) handleCallback(ctx context.Context, cb *models.CallbackQuery) 
 	}
 }
 
-// ingestAndReply runs an unvalidated ingest and reports the outcome.
-func (h *Handler) ingestAndReply(ctx context.Context, chatID int64, req domain.IngestTextRequest) error {
+// ingestAndReplyWithRawInput runs an unvalidated ingest and reports the
+// outcome. If rawInputID is non-zero and rawInputs is set, it promotes
+// the raw_input row after a successful ingest (REQ-07). Best-effort:
+// a promotion failure is logged at WARN and never surfaces to the user.
+func (h *Handler) ingestAndReplyWithRawInput(ctx context.Context, chatID int64, req domain.IngestTextRequest, rawInputID uuid.UUID) error {
 	result, err := h.service.Ingest(ctx, req)
 	if err != nil {
 		h.logger.Error("telegram ingest error",
@@ -319,6 +389,15 @@ func (h *Handler) ingestAndReply(ctx context.Context, chatID int64, req domain.I
 	h.logger.Info("telegram message ingested",
 		slog.Int64("chat_id", chatID),
 		slog.Bool("duplicate", result.Duplicate))
+
+	// Best-effort promotion (REQ-07).
+	if h.rawInputs != nil && rawInputID != uuid.Nil {
+		if err := h.rawInputs.SetPromoted(ctx, rawInputID, result.ObjectID); err != nil {
+			h.logger.Warn("raw_input set_promoted failed (direct ingest)",
+				slog.String("raw_input_id", rawInputID.String()),
+				slog.String("error", err.Error()))
+		}
+	}
 
 	if result.Duplicate {
 		return h.sender.SendMessage(ctx, chatID, "Duplicate")

@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,44 @@ import (
 )
 
 // --- Fakes for testing ---
+
+// fakeRawInputRepo records calls to app.RawInputRepository for assertion.
+type fakeRawInputRepo struct {
+	creates          []domain.RawInput
+	promoted         []struct{ id, objectID uuid.UUID }
+	discarded        []uuid.UUID
+	collisionSummary []struct {
+		id      uuid.UUID
+		summary domain.Metadata
+	}
+	createErr          error
+	setPromotedErr     error
+	setDiscardedErr    error
+	setCollSummaryErr  error
+}
+
+func (r *fakeRawInputRepo) Create(_ context.Context, ri domain.RawInput) error {
+	r.creates = append(r.creates, ri)
+	return r.createErr
+}
+
+func (r *fakeRawInputRepo) SetPromoted(_ context.Context, id, objectID uuid.UUID) error {
+	r.promoted = append(r.promoted, struct{ id, objectID uuid.UUID }{id, objectID})
+	return r.setPromotedErr
+}
+
+func (r *fakeRawInputRepo) SetDiscarded(_ context.Context, id uuid.UUID) error {
+	r.discarded = append(r.discarded, id)
+	return r.setDiscardedErr
+}
+
+func (r *fakeRawInputRepo) SetCollisionSummary(_ context.Context, id uuid.UUID, summary domain.Metadata) error {
+	r.collisionSummary = append(r.collisionSummary, struct {
+		id      uuid.UUID
+		summary domain.Metadata
+	}{id, summary})
+	return r.setCollSummaryErr
+}
 
 // fakeSender records every Telegram operation for assertion.
 type fakeSender struct {
@@ -494,7 +533,7 @@ func TestHandlerUsesStoreAbstraction(t *testing.T) {
 	store := newFakePendingStore()
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, sender, store, nil)
+	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
 	handler.newToken = func() string { return "tok123" }
 
 	if err := handler.ProcessUpdate(context.Background(), testUpdate("propongo Python")); err != nil {
@@ -531,7 +570,7 @@ func TestHandlerDegradesOnStoreSaveError(t *testing.T) {
 	store.saveErr = errors.New("postgres unreachable")
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, sender, store, nil)
+	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
 
 	if err := handler.ProcessUpdate(context.Background(), testUpdate("anything")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -561,7 +600,7 @@ func TestHandlerHandlesStoreTakeError(t *testing.T) {
 	store.takeErr = errors.New("postgres connection lost")
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, sender, store, nil)
+	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
 
 	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok123", 100, 555)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -597,7 +636,7 @@ func TestHandlerExpiredEntryReportsUnavailable(t *testing.T) {
 	}
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, sender, store, nil)
+	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
 
 	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok-stale", 100, 555)); err != nil {
 		t.Fatalf("callback: %v", err)
@@ -607,5 +646,202 @@ func TestHandlerExpiredEntryReportsUnavailable(t *testing.T) {
 	}
 	if len(sender.answers) != 1 || !strings.Contains(sender.answers[0].text, "disponible") {
 		t.Fatalf("expected 'no disponible' answer, got %+v", sender.answers)
+	}
+}
+
+// newTestHandlerWithRawInputs builds a handler with a fake rawInputRepo
+// and optional collision detector. The pending store defaults to
+// in-memory (nil → installed by newHandlerWithStore).
+func newTestHandlerWithRawInputs(sender *fakeSender, sourceRepo *fakeSourceRepo, detector collisionChecker, rawInputs app.RawInputRepository) *Handler {
+	uow := &fakeIngestionUOW{repos: &testRepos{source: sourceRepo}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	return newHandlerWithStore(svc, detector, rawInputs, sender, nil, nil)
+}
+
+// TestHandleMessageCreatesRawInput verifies that handleMessage calls
+// Create on the raw_input repo with the expected fields (REQ-05).
+func TestHandleMessageCreatesRawInput(t *testing.T) {
+	sender := &fakeSender{}
+	rawInputs := &fakeRawInputRepo{}
+	handler := newTestHandlerWithRawInputs(sender, &fakeSourceRepo{}, nil, rawInputs)
+
+	update := testUpdate("usamos Redis")
+	if err := handler.ProcessUpdate(context.Background(), update); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(rawInputs.creates) != 1 {
+		t.Fatalf("Create called %d times, want 1", len(rawInputs.creates))
+	}
+	got := rawInputs.creates[0]
+	if got.Channel != domain.RawInputChannelTelegram {
+		t.Errorf("Channel = %q, want %q", got.Channel, domain.RawInputChannelTelegram)
+	}
+	if got.Content != "usamos Redis" {
+		t.Errorf("Content = %q, want %q", got.Content, "usamos Redis")
+	}
+	if got.ActorID != strconv.FormatInt(200, 10) {
+		t.Errorf("ActorID = %q, want %q", got.ActorID, strconv.FormatInt(200, 10))
+	}
+	if got.WorkspaceID != "default" {
+		t.Errorf("WorkspaceID = %q, want %q", got.WorkspaceID, "default")
+	}
+	if got.Status != domain.RawInputStatusPending {
+		t.Errorf("Status = %q, want %q", got.Status, domain.RawInputStatusPending)
+	}
+	if got.ExternalRef["chat_id"] != int64(100) {
+		t.Errorf("ExternalRef[chat_id] = %v, want %d", got.ExternalRef["chat_id"], 100)
+	}
+}
+
+// TestHandleMessageNoCollisionCallsSetPromoted verifies that after a
+// successful direct ingest with no collision, SetPromoted is called
+// with the raw_input ID (REQ-07).
+func TestHandleMessageNoCollisionCallsSetPromoted(t *testing.T) {
+	sender := &fakeSender{}
+	rawInputs := &fakeRawInputRepo{}
+	det := &fakeDetector{collisions: nil}
+	handler := newTestHandlerWithRawInputs(sender, &fakeSourceRepo{}, det, rawInputs)
+
+	if err := handler.ProcessUpdate(context.Background(), testUpdate("algo nuevo")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(rawInputs.promoted) != 1 {
+		t.Fatalf("SetPromoted called %d times, want 1", len(rawInputs.promoted))
+	}
+	if rawInputs.promoted[0].id != rawInputs.creates[0].ID {
+		t.Errorf("SetPromoted id = %s, want %s", rawInputs.promoted[0].id, rawInputs.creates[0].ID)
+	}
+}
+
+// TestHandleMessageRawInputCreateErrorDegrades verifies that a Create
+// error from the raw_input repo does not abort the ingest flow (S-05).
+func TestHandleMessageRawInputCreateErrorDegrades(t *testing.T) {
+	sender := &fakeSender{}
+	rawInputs := &fakeRawInputRepo{createErr: errors.New("db unreachable")}
+	handler := newTestHandlerWithRawInputs(sender, &fakeSourceRepo{}, nil, rawInputs)
+
+	if err := handler.ProcessUpdate(context.Background(), testUpdate("trigger error path")); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	// Ingest should still run — user sees "Saved"
+	if len(sender.messages) != 1 || sender.messages[0].text != "Saved" {
+		t.Fatalf("expected 'Saved' after Create error, got %+v", sender.messages)
+	}
+	// SetPromoted must NOT be called when Create failed (rawInputID is zero)
+	if len(rawInputs.promoted) != 0 {
+		t.Errorf("SetPromoted called %d times after Create error, want 0", len(rawInputs.promoted))
+	}
+}
+
+// TestCallbackKeepCallsSetPromoted verifies that "keep" callback calls
+// SetPromoted with the pv.RawInputID (REQ-08).
+func TestCallbackKeepCallsSetPromoted(t *testing.T) {
+	sender := &fakeSender{}
+	rawInputs := &fakeRawInputRepo{}
+	det := &fakeDetector{collisions: []app.Collision{sampleCollision()}}
+	store := newFakePendingStore()
+	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	handler := newHandlerWithStore(svc, det, rawInputs, sender, store, nil)
+	handler.newToken = func() string { return "tok-keep" }
+
+	// Trigger the collision prompt (creates raw_input and saves PendingValidation).
+	if err := handler.ProcessUpdate(context.Background(), testUpdate("propongo algo")); err != nil {
+		t.Fatalf("prompt step: %v", err)
+	}
+	if len(rawInputs.creates) != 1 {
+		t.Fatalf("Create not called during prompt step")
+	}
+	rawID := rawInputs.creates[0].ID
+
+	// User taps "keep".
+	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok-keep", 100, 555)); err != nil {
+		t.Fatalf("keep step: %v", err)
+	}
+
+	if len(rawInputs.promoted) != 1 {
+		t.Fatalf("SetPromoted called %d times on keep, want 1", len(rawInputs.promoted))
+	}
+	if rawInputs.promoted[0].id != rawID {
+		t.Errorf("SetPromoted id = %s, want %s", rawInputs.promoted[0].id, rawID)
+	}
+}
+
+// TestCallbackDiscardCallsSetDiscarded verifies that "discard" callback
+// calls SetDiscarded with the pv.RawInputID (REQ-09).
+func TestCallbackDiscardCallsSetDiscarded(t *testing.T) {
+	sender := &fakeSender{}
+	rawInputs := &fakeRawInputRepo{}
+	det := &fakeDetector{collisions: []app.Collision{sampleCollision()}}
+	store := newFakePendingStore()
+	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	handler := newHandlerWithStore(svc, det, rawInputs, sender, store, nil)
+	handler.newToken = func() string { return "tok-discard" }
+
+	_ = handler.ProcessUpdate(context.Background(), testUpdate("propongo algo"))
+	if len(rawInputs.creates) != 1 {
+		t.Fatalf("Create not called during prompt step")
+	}
+	rawID := rawInputs.creates[0].ID
+
+	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("discard:tok-discard", 100, 555)); err != nil {
+		t.Fatalf("discard step: %v", err)
+	}
+
+	if len(rawInputs.discarded) != 1 {
+		t.Fatalf("SetDiscarded called %d times on discard, want 1", len(rawInputs.discarded))
+	}
+	if rawInputs.discarded[0] != rawID {
+		t.Errorf("SetDiscarded id = %s, want %s", rawInputs.discarded[0], rawID)
+	}
+}
+
+// TestCallbackDiscardZeroRawInputIDSkipsSetDiscarded verifies that
+// when PendingValidation.RawInputID is the zero UUID, SetDiscarded is
+// NOT called (S-08: forward-compat for pre-migration records).
+func TestCallbackDiscardZeroRawInputIDSkipsSetDiscarded(t *testing.T) {
+	sender := &fakeSender{}
+	rawInputs := &fakeRawInputRepo{}
+	det := &fakeDetector{}
+	store := newFakePendingStore()
+	// Seed a pending validation with zero RawInputID (simulates pre-migration row).
+	if err := store.Save(context.Background(), app.PendingValidation{
+		Token:      "tok-legacy",
+		ChatID:     100,
+		Request:    domain.IngestTextRequest{WorkspaceID: "default", Content: "old"},
+		Collision:  sampleCollision(),
+		RawInputID: uuid.Nil, // zero = pre-migration
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
+	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+	handler := newHandlerWithStore(svc, det, rawInputs, sender, store, nil)
+
+	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("discard:tok-legacy", 100, 555)); err != nil {
+		t.Fatalf("discard step: %v", err)
+	}
+
+	if len(rawInputs.discarded) != 0 {
+		t.Errorf("SetDiscarded called %d times with zero RawInputID, want 0", len(rawInputs.discarded))
+	}
+}
+
+// TestNilRawInputsRepoPreservesExistingBehavior verifies that passing
+// nil as the rawInputs repo leaves all existing flows intact.
+func TestNilRawInputsRepoPreservesExistingBehavior(t *testing.T) {
+	sender := &fakeSender{}
+	// nil rawInputs — no raw_input staging
+	handler := newTestHandlerWithRawInputs(sender, &fakeSourceRepo{}, nil, nil)
+
+	if err := handler.ProcessUpdate(context.Background(), testUpdate("hello")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sender.messages) != 1 || sender.messages[0].text != "Saved" {
+		t.Fatalf("expected 'Saved' with nil rawInputs, got %+v", sender.messages)
 	}
 }

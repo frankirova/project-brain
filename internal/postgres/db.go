@@ -82,3 +82,30 @@ func (db *DB) WithinIngestionTx(ctx context.Context, fn func(context.Context, ap
 	}
 	return nil
 }
+
+func (db *DB) WithinObjectValidationTx(ctx context.Context, fn func(context.Context, app.ObjectValidationRepositories) error) error {
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		db.logger.Error("begin object validation tx failed", slog.String("error", err.Error()))
+		return err
+	}
+
+	repos := newObjectValidationRepositories(tx)
+	if err := fn(ctx, repos); err != nil {
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			db.logger.Error("object validation rollback failed",
+				slog.String("tx_error", err.Error()),
+				slog.String("rollback_error", rollbackErr.Error()))
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		db.logger.Error("object validation commit failed",
+			slog.String("error", commitErr.Error()))
+		return commitErr
+	}
+	return nil
+}

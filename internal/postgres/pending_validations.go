@@ -7,6 +7,7 @@ import (
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -53,16 +54,21 @@ func (s *PendingValidationStore) Save(ctx context.Context, entry app.PendingVali
 	if !entry.ExpiresAt.IsZero() {
 		expiresAt = entry.ExpiresAt
 	}
+	var rawInputID any
+	if entry.RawInputID != (uuid.UUID{}) {
+		rawInputID = entry.RawInputID
+	}
 	_, err = s.pool.Exec(ctx, `
-INSERT INTO telegram_pending_validations (token, chat_id, request, collision, expires_at)
-VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+INSERT INTO telegram_pending_validations (token, chat_id, request, collision, expires_at, raw_input_id)
+VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6)
 ON CONFLICT (token) DO UPDATE
   SET chat_id = EXCLUDED.chat_id,
       request = EXCLUDED.request,
       collision = EXCLUDED.collision,
       created_at = now(),
-      expires_at = EXCLUDED.expires_at`,
-		entry.Token, entry.ChatID, request, collision, expiresAt,
+      expires_at = EXCLUDED.expires_at,
+      raw_input_id = EXCLUDED.raw_input_id`,
+		entry.Token, entry.ChatID, request, collision, expiresAt, rawInputID,
 	)
 	return err
 }
@@ -75,17 +81,18 @@ ON CONFLICT (token) DO UPDATE
 // expires_at have no TTL and are always eligible.
 func (s *PendingValidationStore) Take(ctx context.Context, token string) (app.PendingValidation, error) {
 	var (
-		chatID int64
-		rawReq []byte
-		rawCol []byte
+		chatID     int64
+		rawReq     []byte
+		rawCol     []byte
+		rawInputID *uuid.UUID // nullable
 	)
 	err := s.pool.QueryRow(ctx, `
 DELETE FROM telegram_pending_validations
 WHERE token = $1
   AND (expires_at IS NULL OR expires_at > now())
-RETURNING chat_id, request, collision`,
+RETURNING chat_id, request, collision, raw_input_id`,
 		token,
-	).Scan(&chatID, &rawReq, &rawCol)
+	).Scan(&chatID, &rawReq, &rawCol, &rawInputID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return app.PendingValidation{}, app.ErrNotFound
@@ -101,11 +108,17 @@ RETURNING chat_id, request, collision`,
 	if err := json.Unmarshal(rawCol, &col); err != nil {
 		return app.PendingValidation{}, err
 	}
+
+	var riID uuid.UUID
+	if rawInputID != nil {
+		riID = *rawInputID
+	}
 	return app.PendingValidation{
-		Token:     token,
-		ChatID:    chatID,
-		Request:   req,
-		Collision: col,
+		Token:      token,
+		ChatID:     chatID,
+		Request:    req,
+		Collision:  col,
+		RawInputID: riID,
 	}, nil
 }
 

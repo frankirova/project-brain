@@ -18,8 +18,9 @@ import (
 // populated KnowledgeObject.
 func samplePendingValidation() app.PendingValidation {
 	return app.PendingValidation{
-		Token:  uuid.NewString(),
-		ChatID: 4242,
+		Token:      uuid.NewString(),
+		ChatID:     4242,
+		RawInputID: uuid.New(),
 		Request: domain.IngestTextRequest{
 			WorkspaceID: "default",
 			Content:     "propongo Postgres para persistir el outbox",
@@ -123,6 +124,9 @@ func TestPendingValidationStoreSaveAndTakeRoundTrip(t *testing.T) {
 	}
 	if len(got.Collision.Object.Tags) != len(entry.Collision.Object.Tags) {
 		t.Errorf("Collision.Object.Tags len = %d, want %d", len(got.Collision.Object.Tags), len(entry.Collision.Object.Tags))
+	}
+	if got.RawInputID != entry.RawInputID {
+		t.Errorf("RawInputID = %s, want %s", got.RawInputID, entry.RawInputID)
 	}
 }
 

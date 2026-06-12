@@ -2,7 +2,7 @@ package postgres
 
 import (
 	"context"
-	"hash/fnv"
+	"fmt"
 	"testing"
 
 	"github.com/frankirova/project-brain/internal/app"
@@ -10,27 +10,39 @@ import (
 	"github.com/google/uuid"
 )
 
-// stubEmbedder is a deterministic Embedder for integration tests.
-// It produces 1536-dimensional vectors without calling any external API.
-// Two identical texts produce identical vectors; two different texts
-// land at different positions in the vector space (via FNV hash).
-type stubEmbedder struct{}
+// stubEmbedder is an explicit-map Embedder for integration tests.
+// Each test registers the exact text→vector pairs it needs, making
+// the similarity semantics self-documenting. Embedding an unregistered
+// text is a test bug and fails immediately.
+type stubEmbedder struct {
+	vectors map[string][]float32
+}
+
+func newStubEmbedder(pairs map[string][]float32) *stubEmbedder {
+	return &stubEmbedder{vectors: pairs}
+}
 
 func (s *stubEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
-	h := fnv.New32a()
-	h.Write([]byte(text))
-	idx := int(h.Sum32() % 1536)
-	vec := make([]float32, 1536)
-	vec[idx] = 1.0
-	return vec, nil
+	if v, ok := s.vectors[text]; ok {
+		return v, nil
+	}
+	return nil, fmt.Errorf("stubEmbedder: unregistered text %q — add it to the test's vector map", text)
 }
 
 func (s *stubEmbedder) Dimensions() int { return 1536 }
 func (s *stubEmbedder) Model() string   { return "stub-test-embedder" }
 
+// unitVec returns a 1536-dim unit vector with a 1.0 at position pos.
+// Two unitVec calls with different positions have cosine similarity 0;
+// two with the same position have cosine similarity 1.
+func unitVec(pos int) []float32 {
+	vec := make([]float32, 1536)
+	vec[pos] = 1.0
+	return vec
+}
+
 func mustEmbed(t *testing.T, embedder app.Embedder, text string) []float32 {
 	t.Helper()
-
 	vec, err := embedder.Embed(context.Background(), text)
 	if err != nil {
 		t.Fatalf("Embed(%q): %v", text, err)
@@ -41,6 +53,12 @@ func mustEmbed(t *testing.T, embedder app.Embedder, text string) []float32 {
 // TestEmbeddingRepoUpsertAndFindSimilar verifies that Upsert persists
 // a vector and FindSimilar returns the closest object by cosine distance.
 func TestEmbeddingRepoUpsertAndFindSimilar(t *testing.T) {
+	const content = "embedding integration test content"
+	// pos=0: unitVec(0) has cosine similarity 1.0 with itself and 0 with any other unitVec.
+	embedder := newStubEmbedder(map[string][]float32{
+		content: unitVec(0),
+	})
+
 	db := openIntegrationDB(t)
 	workspaceID := "workspace-" + uuid.NewString()
 	t.Cleanup(func() { cleanupWorkspace(t, db.pool, workspaceID) })
@@ -48,15 +66,14 @@ func TestEmbeddingRepoUpsertAndFindSimilar(t *testing.T) {
 	svc := app.NewIngestTextService(db)
 	res, err := svc.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: workspaceID,
-		Content:     "embedding integration test content",
+		Content:     content,
 		Object:      domain.ObjectInput{Type: "note"},
 	})
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	embedder := &stubEmbedder{}
-	vec := mustEmbed(t, embedder, "embedding integration test content")
+	vec := mustEmbed(t, embedder, content)
 
 	repo := NewEmbeddingRepo(db.pool)
 	if err := repo.Upsert(context.Background(), domain.Embedding{
@@ -90,12 +107,18 @@ func TestEmbeddingRepoUpsertAndFindSimilar(t *testing.T) {
 // TestVectorRetrieverSearch verifies the full vectorRetriever stack:
 // embed query → FindSimilar → hydrate via FTSRetriever.
 func TestVectorRetrieverSearch(t *testing.T) {
+	const queryText = "vector retriever integration test"
+	// The same text is used for both the stored embedding and the search
+	// query, so cosine similarity will be 1.0 and the object must rank first.
+	embedder := newStubEmbedder(map[string][]float32{
+		queryText: unitVec(1),
+	})
+
 	db := openIntegrationDB(t)
 	workspaceID := "workspace-" + uuid.NewString()
 	t.Cleanup(func() { cleanupWorkspace(t, db.pool, workspaceID) })
 
 	svc := app.NewIngestTextService(db)
-	queryText := "vector retriever integration test"
 	res, err := svc.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: workspaceID,
 		Content:     queryText,
@@ -105,7 +128,6 @@ func TestVectorRetrieverSearch(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	embedder := &stubEmbedder{}
 	vec := mustEmbed(t, embedder, queryText)
 	embeddingRepo := NewEmbeddingRepo(db.pool)
 	if err := embeddingRepo.Upsert(context.Background(), domain.Embedding{
@@ -147,14 +169,25 @@ func TestVectorRetrieverSearch(t *testing.T) {
 // an object that appears in both FTS and vector results should rank above
 // objects that appear in only one.
 func TestCompositeRetrieverHybridSearch(t *testing.T) {
+	const (
+		// All tokens in queryText also appear in contentB, so FTS (plainto_tsquery AND semantics)
+		// finds both objects. Their vectors are orthogonal (unitVec(2) · unitVec(3) = 0), so vector
+		// search only returns objectA. This makes the RRF ranking deterministic: objectA appears in
+		// both retrievers (dual boost), objectB only in FTS.
+		queryText = "hybrid composite retriever test"
+		contentB  = "hybrid composite retriever test additional document"
+	)
+	embedder := newStubEmbedder(map[string][]float32{
+		queryText: unitVec(2),
+		contentB:  unitVec(3),
+	})
+
 	db := openIntegrationDB(t)
 	workspaceID := "workspace-" + uuid.NewString()
 	t.Cleanup(func() { cleanupWorkspace(t, db.pool, workspaceID) })
 
 	svc := app.NewIngestTextService(db)
-	embedder := &stubEmbedder{}
 	embeddingRepo := NewEmbeddingRepo(db.pool)
-	queryText := "hybrid rrfusion composite retriever test"
 
 	ingestAndEmbed := func(content string) uuid.UUID {
 		t.Helper()
@@ -179,16 +212,16 @@ func TestCompositeRetrieverHybridSearch(t *testing.T) {
 		return res.ObjectID
 	}
 
-	// objectA: exact query text → both FTS and vector will match it.
+	// objectA: stored with unitVec(2) → identical to the query vector → cosine=1.0.
+	// Appears in both FTS (shares tokens) and vector search.
 	objectA := ingestAndEmbed(queryText)
 
-	// objectB: FTS-only; its text shares some tokens with the query but
-	// its embedding vector is different (different hash position), so
-	// vector search won't rank it highly. No embedding needed; FTS alone
-	// puts it in the composite result set.
+	// objectB: FTS-only. Its embedding is unitVec(3) — orthogonal to the query
+	// vector, so vector search scores it 0 and it won't appear there. Only FTS
+	// surfaces it (shared tokens: "hybrid", "composite", "retriever").
 	resB, err := svc.Ingest(context.Background(), domain.IngestTextRequest{
 		WorkspaceID: workspaceID,
-		Content:     "hybrid composite retriever additional document",
+		Content:     contentB,
 		Object:      domain.ObjectInput{Type: "note"},
 	})
 	if err != nil {

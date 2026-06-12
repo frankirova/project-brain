@@ -20,6 +20,11 @@ type repositories struct {
 	auditEvents      *auditEventRepository
 }
 
+type objectValidationRepositories struct {
+	objects     *knowledgeObjectRepository
+	auditEvents *auditEventRepository
+}
+
 func newRepositories(tx pgx.Tx) *repositories {
 	return &repositories{
 		sources:          &sourceRepository{tx: tx},
@@ -29,10 +34,22 @@ func newRepositories(tx pgx.Tx) *repositories {
 	}
 }
 
+func newObjectValidationRepositories(tx pgx.Tx) *objectValidationRepositories {
+	return &objectValidationRepositories{
+		objects:     &knowledgeObjectRepository{tx: tx},
+		auditEvents: &auditEventRepository{tx: tx},
+	}
+}
+
 func (r *repositories) Sources() app.SourceRepository                   { return r.sources }
 func (r *repositories) KnowledgeObjects() app.KnowledgeObjectRepository { return r.knowledgeObjects }
 func (r *repositories) ObjectSources() app.ObjectSourceRepository       { return r.objectSources }
 func (r *repositories) AuditEvents() app.AuditEventRepository           { return r.auditEvents }
+
+func (r *objectValidationRepositories) Objects() app.ObjectValidationObjectRepository {
+	return r.objects
+}
+func (r *objectValidationRepositories) AuditEvents() app.AuditEventRepository { return r.auditEvents }
 
 // Relations returns a standalone RelationRepository backed by its own connection.
 func (db *DB) Relations() app.RelationRepository {
@@ -159,6 +176,30 @@ WHERE workspace_id = $1 AND id = $2`,
 	return nil
 }
 
+func (r *knowledgeObjectRepository) FindByIDForUpdate(ctx context.Context, workspaceID string, id uuid.UUID) (domain.KnowledgeObject, error) {
+	const query = `
+SELECT id, workspace_id, type, COALESCE(title, '') AS title,
+       COALESCE(summary, '') AS summary, content, status, metadata,
+       COALESCE(created_by, '') AS created_by, created_at, updated_at,
+       project_id, tags, confidence, importance
+FROM knowledge_objects
+WHERE workspace_id = $1 AND id = $2
+FOR UPDATE`
+	var obj domain.KnowledgeObject
+	err := r.tx.QueryRow(ctx, query, workspaceID, id).Scan(
+		&obj.ID, &obj.WorkspaceID, &obj.Type, &obj.Title, &obj.Summary, &obj.Content,
+		&obj.Status, &obj.Metadata, &obj.CreatedBy, &obj.CreatedAt, &obj.UpdatedAt,
+		&obj.ProjectID, &obj.Tags, &obj.Confidence, &obj.Importance,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.KnowledgeObject{}, app.ErrNotFound
+		}
+		return domain.KnowledgeObject{}, err
+	}
+	return obj, nil
+}
+
 type objectSourceRepository struct {
 	tx pgx.Tx
 }
@@ -175,20 +216,32 @@ type auditEventRepository struct {
 }
 
 func (r *auditEventRepository) Create(ctx context.Context, event domain.AuditEvent) error {
+	before, err := marshalMetadata(event.Before)
+	if err != nil {
+		return err
+	}
 	after, err := marshalMetadata(event.After)
 	if err != nil {
 		return err
 	}
+	metadata, err := marshalMetadata(event.Metadata)
+	if err != nil {
+		return err
+	}
 	_, err = r.tx.Exec(ctx, `
-INSERT INTO audit_events (id, workspace_id, actor_id, action, target_type, target_id, after, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
+INSERT INTO audit_events (id, workspace_id, actor_id, action, target_type, target_id, before, after, reason, request_id, metadata, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11::jsonb, $12)`,
 		event.ID,
 		event.WorkspaceID,
 		nullableString(event.ActorID),
 		event.Action,
 		event.TargetType,
 		event.TargetID,
+		before,
 		after,
+		nullableString(event.Reason),
+		nullableUUID(event.RequestID),
+		metadata,
 		event.CreatedAt,
 	)
 	return err
@@ -236,9 +289,11 @@ func nullableInt(value *int) *int {
 
 var _ app.SourceRepository = (*sourceRepository)(nil)
 var _ app.KnowledgeObjectRepository = (*knowledgeObjectRepository)(nil)
+var _ app.ObjectValidationObjectRepository = (*knowledgeObjectRepository)(nil)
 var _ app.ObjectSourceRepository = (*objectSourceRepository)(nil)
 var _ app.AuditEventRepository = (*auditEventRepository)(nil)
 var _ app.IngestionRepositories = (*repositories)(nil)
+var _ app.ObjectValidationRepositories = (*objectValidationRepositories)(nil)
 var _ app.RelationRepository = (*relationRepository)(nil)
 
 // relationRepository is a standalone repository for typed directed edges.

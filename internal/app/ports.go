@@ -10,9 +10,14 @@ import (
 )
 
 var ErrNotFound = errors.New("not found")
+var ErrInvalidTransition = errors.New("invalid transition")
 
 type IngestionUnitOfWork interface {
 	WithinIngestionTx(ctx context.Context, fn func(context.Context, IngestionRepositories) error) error
+}
+
+type ObjectValidationUnitOfWork interface {
+	WithinObjectValidationTx(ctx context.Context, fn func(context.Context, ObjectValidationRepositories) error) error
 }
 
 // IngestionRepositories bundles the four repository interfaces that
@@ -30,6 +35,16 @@ type IngestionRepositories interface {
 	KnowledgeObjects() KnowledgeObjectRepository
 	ObjectSources() ObjectSourceRepository
 	AuditEvents() AuditEventRepository
+}
+
+type ObjectValidationRepositories interface {
+	Objects() ObjectValidationObjectRepository
+	AuditEvents() AuditEventRepository
+}
+
+type ObjectValidationObjectRepository interface {
+	FindByIDForUpdate(ctx context.Context, workspaceID string, id uuid.UUID) (domain.KnowledgeObject, error)
+	UpdateStatus(ctx context.Context, workspaceID string, id uuid.UUID, status string) error
 }
 
 type SourceRepository interface {
@@ -77,12 +92,35 @@ const PendingValidationTTL = 24 * time.Hour
 // source message. ExpiresAt is the absolute cutoff after which Take
 // must behave as if the entry were never saved; a zero value means
 // "no expiry" (used by tests; production callers should set it).
+// RawInputID links this validation to its raw_inputs row; a zero UUID
+// means no raw_input is associated (forward-compat: entries written
+// before migration 0011 have no raw_input_id).
 type PendingValidation struct {
-	Token     string
-	ChatID    int64
-	Request   domain.IngestTextRequest
-	Collision Collision
-	ExpiresAt time.Time
+	Token      string
+	ChatID     int64
+	Request    domain.IngestTextRequest
+	Collision  Collision
+	RawInputID uuid.UUID
+	ExpiresAt  time.Time
+}
+
+// RawInputRepository is the durability boundary for the raw_inputs
+// staging table. Implementations operate outside any ingestion
+// transaction — all methods are best-effort and must never be called
+// from within an IngestionUnitOfWork callback.
+//
+//   - Create inserts a new row with status="pending".
+//   - SetPromoted atomically sets status="promoted", promoted_object_id,
+//     and updated_at=now().
+//   - SetDiscarded atomically sets status="discarded" and updated_at=now().
+//   - SetCollisionSummary sets the collision_summary JSONB column; called
+//     after collision detection returns hits, before the inline keyboard
+//     is sent to the user.
+type RawInputRepository interface {
+	Create(ctx context.Context, ri domain.RawInput) error
+	SetPromoted(ctx context.Context, id uuid.UUID, objectID uuid.UUID) error
+	SetDiscarded(ctx context.Context, id uuid.UUID) error
+	SetCollisionSummary(ctx context.Context, id uuid.UUID, summary domain.Metadata) error
 }
 
 // PendingValidationStore is the durability boundary for in-flight

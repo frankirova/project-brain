@@ -268,8 +268,11 @@ func TestEmbeddingRetryServiceFullStackDrainsBacklog(t *testing.T) {
 	workspaceID := "workspace-" + uuid.NewString()
 	t.Cleanup(func() { cleanupWorkspace(t, db.pool, workspaceID) })
 
-	objectID := ingestForEmbeddingJob(t, db, workspaceID, "full stack retry content")
-	embedder := &stubEmbedder{}
+	const retryContent = "full stack retry content"
+	objectID := ingestForEmbeddingJob(t, db, workspaceID, retryContent)
+	embedder := newStubEmbedder(map[string][]float32{
+		retryContent: unitVec(10),
+	})
 	embeddingRepo := NewEmbeddingRepo(db.pool)
 	jobRepo := NewEmbeddingJobRepo(db.pool)
 	finder := NewFTSRetriever(db.pool)
@@ -299,7 +302,7 @@ func TestEmbeddingRetryServiceFullStackDrainsBacklog(t *testing.T) {
 	}
 
 	// Embedding row exists for the object now.
-	vec := mustEmbed(t, embedder, "full stack retry content")
+	vec := mustEmbed(t, embedder, retryContent)
 	hits, err := embeddingRepo.FindSimilar(context.Background(), workspaceID, vec, 5)
 	if err != nil {
 		t.Fatalf("FindSimilar: %v", err)

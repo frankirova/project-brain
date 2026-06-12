@@ -206,9 +206,11 @@ func main() {
 		// startup; the handler keeps depending on the interface only.
 		var tgStore app.PendingValidationStore
 		var pgStore *postgres.PendingValidationStore
+		var rawInputRepo app.RawInputRepository // nil when no postgres backend
 		if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
 			pgStore = postgres.NewPendingValidationStore(pgDB.Pool())
 			tgStore = pgStore
+			rawInputRepo = postgres.NewRawInputRepo(pgDB.Pool())
 			// Reap rows that expired since the previous run. Stale
 			// prompts are harmless to read (Take already filters
 			// them out) but they would keep the table growing across
@@ -227,9 +229,9 @@ func main() {
 		// check fail and panic on the first message.
 		var tgHandler *telegram.Handler
 		if collisionDetector != nil {
-			tgHandler = telegram.NewHandlerWithStore(svc, collisionDetector, nil, logger, tgStore)
+			tgHandler = telegram.NewHandlerWithStore(svc, collisionDetector, rawInputRepo, nil, logger, tgStore)
 		} else {
-			tgHandler = telegram.NewHandlerWithStore(svc, nil, nil, logger, tgStore)
+			tgHandler = telegram.NewHandlerWithStore(svc, nil, rawInputRepo, nil, logger, tgStore)
 		}
 		b, err := tgbot.New(cfg.TelegramBotToken,
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),
