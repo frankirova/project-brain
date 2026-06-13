@@ -107,11 +107,16 @@ func (s *inMemReviewStore) SweepExpired(_ context.Context) (int64, error) {
 // newTestHandlerWithBacklog is the test seam for the backlog flow.
 // detector and rawInputs default to nil; the backlog query, finder,
 // and review store are passed in. Pass nil reviewStore to exercise
-// the in-memory fallback installed by the composition seam.
+// the in-memory fallback installed by the composition seam. The
+// validator and debater slots are left nil: the PR2 tests do not
+// exercise the rv: dispatch path, so a nil validator/debater is
+// the natural state for /backlog-only test cases. PR3 tests use
+// newTestHandlerWithBacklogAndReview (or call newHandlerWithBacklog
+// directly) when they need to drive the dispatch.
 func newTestHandlerWithBacklog(sender *fakeSender, backlog backlogLister, finder app.KnowledgeObjectFinder, review reviewActionStore) *Handler {
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	return newHandlerWithBacklog(svc, nil, nil, sender, nil, nil, backlog, finder, review)
+	return newHandlerWithBacklog(svc, nil, nil, sender, nil, nil, backlog, finder, review, nil, nil)
 }
 
 // backlogUpdate returns a /backlog command update. chatID and fromID

@@ -126,6 +126,27 @@ type backlogLister interface {
 // in-memory implementations satisfy.
 type reviewActionStore = app.TelegramReviewActionStore
 
+// reviewValidator is the slice of *app.ValidateObjectService the
+// review callback handler needs. The MVP uses direct validation
+// (no MarkDebating first) for proposed rows, and the service owns
+// the proposed-source guard plus the target whitelist. Nil disables
+// rv: validate/deprecate buttons with a "no disponible" answer;
+// the backlog render path is unaffected.
+type reviewValidator interface {
+	Validate(ctx context.Context, req app.ValidateObjectRequest) (app.ValidateObjectResult, error)
+}
+
+// reviewDebator is the slice of *app.ObjectDebateService the
+// review callback handler needs: MarkDebating for proposed+debate
+// transitions, ResolveDebate for debating+terminal resolutions.
+// Nil disables rv: debate/resolve buttons with a "no disponible"
+// answer; the backlog render path is unaffected. Skip/Next is
+// UI-only and never calls this interface.
+type reviewDebator interface {
+	MarkDebating(ctx context.Context, req app.MarkDebatingRequest) (app.MarkDebatingResult, error)
+	ResolveDebate(ctx context.Context, req app.ResolveDebateRequest) (app.ResolveDebateResult, error)
+}
+
 // telegramWorkspaceDefault is the MVP workspace every backlog card
 // is sourced from. Kept as a named constant so the pin-constraint
 // "MVP workspace default" is visible at the call site and the
@@ -143,6 +164,8 @@ type Handler struct {
 	backlog     backlogLister
 	finder      app.KnowledgeObjectFinder
 	reviewStore reviewActionStore
+	validator   reviewValidator // nil => rv: validate/deprecate answers "no disponible"
+	debater     reviewDebator   // nil => rv: debate/resolve answers "no disponible"
 	logger      *slog.Logger
 	newToken    func() string
 }
@@ -203,11 +226,14 @@ func newHandlerWithStore(svc *app.IngestTextService, detector collisionChecker, 
 // falls back to Title/Summary-only cards; nil reviewStore installs
 // the in-memory fallback (same as pendingStore).
 //
-// The existing NewHandler and NewHandlerWithStore constructors stay
-// available so the composition root in cmd/api/main.go is unchanged
-// in this PR; PR4 (wiring) will switch main.go to this constructor
-// when the production Postgres-backed implementations of backlog,
-// finder, and reviewStore are ready.
+// This constructor is preserved for PR2 callers and for the PR4
+// composition root before the validate/debate services are wired.
+// The lifecycle service plumbing (validate + debate) lives in
+// NewHandlerWithBacklogAndReview so the review callback can
+// dispatch to the existing app services; the constructor here
+// leaves validator and debater nil, which makes the rv: callback
+// answer "no disponible" for the lifecycle actions but keeps the
+// backlog render path intact.
 func NewHandlerWithBacklog(
 	svc *app.IngestTextService,
 	detector collisionChecker,
@@ -222,6 +248,40 @@ func NewHandlerWithBacklog(
 	return newHandlerWithBacklog(
 		svc, detector, rawInputs, &telegramSender{b: b},
 		pending, logger, backlog, finder, reviewStore,
+		nil, nil,
+	)
+}
+
+// NewHandlerWithBacklogAndReview is the full composition seam for
+// the backlog + review-callback flow. It is the constructor the
+// production composition root in cmd/api/main.go will use once the
+// Postgres-backed ValidateObjectService, ObjectDebateService, and
+// KnowledgeObjectFinder are wired. PR4 (wiring) owns that switch.
+//
+// validator and debater are the slices of ValidateObjectService
+// and ObjectDebateService the rv: callback dispatches to. Pass nil
+// for either to disable that subset of buttons with a friendly
+// "no disponible" answer; the backlog render path is unaffected.
+// The thin-adapter contract is preserved: the handler never
+// infers or enforces lifecycle policy, it only translates button
+// taps into existing app-service calls.
+func NewHandlerWithBacklogAndReview(
+	svc *app.IngestTextService,
+	detector collisionChecker,
+	rawInputs app.RawInputRepository,
+	b *bot.Bot,
+	logger *slog.Logger,
+	pending pendingStore,
+	backlog backlogLister,
+	finder app.KnowledgeObjectFinder,
+	reviewStore reviewActionStore,
+	validator reviewValidator,
+	debater reviewDebator,
+) *Handler {
+	return newHandlerWithBacklog(
+		svc, detector, rawInputs, &telegramSender{b: b},
+		pending, logger, backlog, finder, reviewStore,
+		validator, debater,
 	)
 }
 
@@ -229,7 +289,10 @@ func NewHandlerWithBacklog(
 // handlers. pending==nil installs the in-memory fallback; so does
 // reviewStore==nil. backlog==nil and finder==nil are propagated so
 // the handler can answer with their "not configured" / "summary
-// only" fallbacks in tests.
+// only" fallbacks in tests. validator==nil and debater==nil are
+// propagated so the rv: callback can answer "no disponible" when
+// the test does not wire the app services; tests that exercise
+// the callback dispatch must inject non-nil validator/debater.
 func newHandlerWithBacklog(
 	svc *app.IngestTextService,
 	detector collisionChecker,
@@ -240,6 +303,8 @@ func newHandlerWithBacklog(
 	backlog backlogLister,
 	finder app.KnowledgeObjectFinder,
 	reviewStore reviewActionStore,
+	validator reviewValidator,
+	debater reviewDebator,
 ) *Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -259,6 +324,8 @@ func newHandlerWithBacklog(
 		backlog:     backlog,
 		finder:      finder,
 		reviewStore: reviewStore,
+		validator:   validator,
+		debater:     debater,
 		logger:      logger,
 		newToken:    func() string { return uuid.NewString() },
 	}
@@ -528,6 +595,13 @@ func (h *Handler) handleCallback(ctx context.Context, cb *models.CallbackQuery) 
 		return h.sender.AnswerCallback(ctx, cb.ID, "")
 	}
 
+	// PR3: route the rv: namespace to the backlog review flow.
+	// The existing keep: / discard: branches below stay untouched
+	// and continue to handle the collision-validation flow.
+	if action == TelegramReviewActionNamespace {
+		return h.handleReviewCallback(ctx, cb, token)
+	}
+
 	var chatID int64
 	var messageID int
 	if cb.Message.Message != nil {
@@ -593,6 +667,302 @@ func (h *Handler) handleCallback(ctx context.Context, cb *models.CallbackQuery) 
 
 	default:
 		return h.sender.AnswerCallback(ctx, cb.ID, "")
+	}
+}
+
+// handleReviewCallback dispatches an "rv:<token>" Telegram review
+// button press to the matching app service. The flow is:
+//
+//  1. Take the token (single-use) from the PR1 review-action
+//     store. A missing/expired/consumed token is reported as
+//     "ya no está disponible"; a transient storage error is
+//     reported as "temporal, probá de nuevo" and the message is
+//     NOT edited (the human can still wait for the store to
+//     recover on a future tap, even though the token is
+//     single-use — Take either succeeded or it didn't, and the
+//     handler does not invent a retry path that does not exist).
+//  2. Verify the tapping actor and chat match the stored action.
+//     A mismatch (e.g., a different user in a group chat tapped
+//     the button) gets "no es para vos" and the message is NOT
+//     edited. The token is already consumed by Take, so the
+//     intended user cannot tap it; the message text is preserved
+//     for transparency.
+//  3. Skip is UI-only: re-render the next backlog card using the
+//     stored NextCursor. No lifecycle service is called. If the
+//     next page is empty, the card is edited to the "nothing
+//     pending" message. No service is wired for skip because
+//     the action must not mutate lifecycle state per the spec.
+//  4. For lifecycle actions, fetch the current object via the
+//     KnowledgeObjectFinder and compare its status to the stored
+//     ExpectedStatus. A mismatch (stale button: someone else
+//     mutated the row) gets "ya cambió" and the message is
+//     edited to point the human to /backlog. No service is
+//     called. A missing object is the same path with a "no
+//     existe" message.
+//  5. Dispatch to the matching app service by (source status,
+//     action). See the switch below. Each call carries the
+//     stored WorkspaceID/ObjectID, the tapping actor as
+//     ActorID, and a Reason that names the Telegram channel so
+//     the audit trail is auditable from a single read.
+//  6. Map typed app errors (ErrInvalidTransition, ErrNotFound)
+//     to user-friendly replies; transient errors are answered
+//     with "temporal" and do NOT edit the message so other
+//     buttons on the same card remain actionable.
+//
+// The thin-adapter contract is preserved: this method never
+// infers lifecycle state. It loads the trusted context from the
+// store, performs an identity check, an expected-status check,
+// and a single app-service call; the rest is the existing
+// service's policy.
+func (h *Handler) handleReviewCallback(ctx context.Context, cb *models.CallbackQuery, token string) error {
+	chatID := int64(0)
+	messageID := 0
+	if cb.Message.Message != nil {
+		chatID = cb.Message.Message.Chat.ID
+		messageID = cb.Message.Message.ID
+	}
+	actorID := cb.From.ID
+
+	// 1. Take the token. Single-use: the row is gone after Take
+	//    regardless of which branch we take below.
+	action, err := h.reviewStore.Take(ctx, token)
+	if err != nil {
+		if errors.Is(err, app.ErrNotFound) {
+			return h.sender.AnswerCallback(ctx, cb.ID, "Esta acción ya no está disponible")
+		}
+		h.logger.Error("telegram review action take failed",
+			slog.Int64("chat_id", chatID),
+			slog.String("token", token),
+			slog.String("error", err.Error()))
+		return h.sender.AnswerCallback(ctx, cb.ID, "Error temporal; probá de nuevo")
+	}
+
+	// 2. Auth check: actor and chat must match the saved action.
+	if actorID != action.ActorID || chatID != action.ChatID {
+		return h.sender.AnswerCallback(ctx, cb.ID, "Este botón no es para vos")
+	}
+
+	// 3. Skip is UI-only: re-render the next backlog card.
+	if action.Action == app.TelegramReviewActionSkip {
+		return h.renderNextBacklogCard(ctx, cb, chatID, messageID, action)
+	}
+
+	// 4. Stale check: fetch the current object and compare to
+	//    ExpectedStatus. A nil finder means we cannot perform the
+	//    check; treat it as a stale button to keep the
+	//    "no-mutation" contract: refuse to call a service that
+	//    would operate on unverified state.
+	if h.finder == nil {
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "⚠️ No se pudo verificar el estado actual. Usá /backlog para ver el estado real.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Estado no verificable")
+	}
+	obj, err := h.finder.FindByID(ctx, action.WorkspaceID, action.ObjectID)
+	if err != nil {
+		if errors.Is(err, app.ErrNotFound) {
+			_ = h.sender.EditMessageText(ctx, chatID, messageID, "⚠️ Este objeto ya no existe.")
+			return h.sender.AnswerCallback(ctx, cb.ID, "Objeto no encontrado")
+		}
+		h.logger.Warn("telegram review action finder failed",
+			slog.Int64("chat_id", chatID),
+			slog.String("object_id", action.ObjectID.String()),
+			slog.String("error", err.Error()))
+		return h.sender.AnswerCallback(ctx, cb.ID, "Error al leer el objeto; probá de nuevo")
+	}
+	if obj.Status != action.ExpectedStatus {
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "⚠️ Este elemento ya cambió de estado. Usá /backlog para ver el actual.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Estado desactualizado")
+	}
+
+	// 5. Dispatch by (source status, action). Each branch owns
+	//    the AppServiceError -> user-friendly reply mapping via
+	//    the respondReviewServiceError helper so a single helper
+	//    can edit the message, answer the callback, and log
+	//    transient failures uniformly.
+	actor := strconv.FormatInt(actorID, 10)
+	switch {
+	case action.ExpectedStatus == domain.KnowledgeObjectStatusProposed &&
+		action.Action == app.TelegramReviewActionValidate:
+		if h.validator == nil {
+			return h.sender.AnswerCallback(ctx, cb.ID, "Validación no disponible")
+		}
+		_, err := h.validator.Validate(ctx, app.ValidateObjectRequest{
+			WorkspaceID:  action.WorkspaceID,
+			ObjectID:     action.ObjectID,
+			TargetStatus: domain.KnowledgeObjectStatusValidated,
+			ActorID:      actor,
+			Reason:       "telegram validation action",
+		})
+		if err != nil {
+			return h.respondReviewServiceError(ctx, cb, chatID, messageID, err, "validar")
+		}
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "✅ Marcado como validado.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Validado")
+
+	case action.ExpectedStatus == domain.KnowledgeObjectStatusProposed &&
+		action.Action == app.TelegramReviewActionDeprecate:
+		if h.validator == nil {
+			return h.sender.AnswerCallback(ctx, cb.ID, "Validación no disponible")
+		}
+		_, err := h.validator.Validate(ctx, app.ValidateObjectRequest{
+			WorkspaceID:  action.WorkspaceID,
+			ObjectID:     action.ObjectID,
+			TargetStatus: domain.KnowledgeObjectStatusDeprecated,
+			ActorID:      actor,
+			Reason:       "telegram deprecation action",
+		})
+		if err != nil {
+			return h.respondReviewServiceError(ctx, cb, chatID, messageID, err, "deprecar")
+		}
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "🗑 Marcado como deprecado.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Deprecado")
+
+	case action.ExpectedStatus == domain.KnowledgeObjectStatusProposed &&
+		action.Action == app.TelegramReviewActionDebate:
+		if h.debater == nil {
+			return h.sender.AnswerCallback(ctx, cb.ID, "Debate no disponible")
+		}
+		_, err := h.debater.MarkDebating(ctx, app.MarkDebatingRequest{
+			WorkspaceID: action.WorkspaceID,
+			ObjectID:    action.ObjectID,
+			TriggeredBy: domain.DebateTriggerHuman,
+			SuggestedBy: "",
+			ActorID:     actor,
+			Reason:      "telegram debate action",
+		})
+		if err != nil {
+			return h.respondReviewServiceError(ctx, cb, chatID, messageID, err, "abrir debate")
+		}
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "💬 Marcado como en debate.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "En debate")
+
+	case action.ExpectedStatus == domain.KnowledgeObjectStatusDebating &&
+		action.Action == app.TelegramReviewActionValidate:
+		if h.debater == nil {
+			return h.sender.AnswerCallback(ctx, cb.ID, "Debate no disponible")
+		}
+		_, err := h.debater.ResolveDebate(ctx, app.ResolveDebateRequest{
+			WorkspaceID:  action.WorkspaceID,
+			ObjectID:     action.ObjectID,
+			TargetStatus: domain.KnowledgeObjectStatusValidated,
+			ActorID:      actor,
+			Reason:       "telegram validation action",
+		})
+		if err != nil {
+			return h.respondReviewServiceError(ctx, cb, chatID, messageID, err, "resolver debate (validar)")
+		}
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "✅ Debate resuelto: validado.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Validado")
+
+	case action.ExpectedStatus == domain.KnowledgeObjectStatusDebating &&
+		action.Action == app.TelegramReviewActionDeprecate:
+		if h.debater == nil {
+			return h.sender.AnswerCallback(ctx, cb.ID, "Debate no disponible")
+		}
+		_, err := h.debater.ResolveDebate(ctx, app.ResolveDebateRequest{
+			WorkspaceID:  action.WorkspaceID,
+			ObjectID:     action.ObjectID,
+			TargetStatus: domain.KnowledgeObjectStatusDeprecated,
+			ActorID:      actor,
+			Reason:       "telegram deprecation action",
+		})
+		if err != nil {
+			return h.respondReviewServiceError(ctx, cb, chatID, messageID, err, "resolver debate (deprecar)")
+		}
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "🗑 Debate resuelto: deprecado.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Deprecado")
+
+	default:
+		// Unknown (source, action) pair: a future backlog status or
+		// action that the handler has not been taught about. Refuse
+		// to mutate; the human gets a clear "not supported" answer
+		// and the message is edited to point at /backlog.
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "⚠️ Acción no soportada para el estado actual. Usá /backlog para ver el backlog.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Acción no soportada")
+	}
+}
+
+// renderNextBacklogCard edits the original backlog card in place
+// to show the next page's item, or the empty-backlog state. It
+// never mutates lifecycle state (per the spec, Skip is UI-only),
+// and it never inserts a new message — editing in place matches
+// the inline-keyboard UX where buttons retire as the user
+// interacts with the card.
+//
+// The handler reuses the same issueReviewActions path the
+// /backlog command uses so a card produced by Skip carries the
+// same shape (status-aware buttons, NextCursor, TTL) as one
+// produced by /backlog. The only difference is the source of
+// the next page's filter: Skip uses action.NextCursor instead
+// of the empty cursor /backlog uses.
+func (h *Handler) renderNextBacklogCard(ctx context.Context, cb *models.CallbackQuery, chatID int64, messageID int, action app.TelegramReviewAction) error {
+	if h.backlog == nil {
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "El backlog no está disponible en esta build.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Backlog no disponible")
+	}
+	page, err := h.backlog.ListHumanBacklog(ctx, app.BacklogFilter{
+		WorkspaceID: action.WorkspaceID,
+		PageSize:    1,
+		Cursor:      action.NextCursor,
+	})
+	if err != nil {
+		h.logger.Error("telegram review action skip list failed",
+			slog.Int64("chat_id", chatID),
+			slog.String("error", err.Error()))
+		return h.sender.AnswerCallback(ctx, cb.ID, "Error al cargar el siguiente; probá más tarde")
+	}
+	if len(page.Items) == 0 {
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "Nada pendiente en el backlog 🎉")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Sin más elementos")
+	}
+	next := page.Items[0]
+	hydrated := h.hydrateBacklogItem(ctx, chatID, next)
+	specs := backlogButtonsForStatus(next.Status)
+	tokens, saveErr := h.issueReviewActions(ctx, next, page.NextCursor, action.ActorID, chatID, specs)
+	if saveErr != nil {
+		h.logger.Error("telegram review action skip save failed",
+			slog.Int64("chat_id", chatID),
+			slog.String("error", saveErr.Error()))
+		return h.sender.AnswerCallback(ctx, cb.ID, "Error al preparar el siguiente; probá de nuevo")
+	}
+	rows := assembleBacklogRows(specs, tokens)
+	if err := h.sender.SendMessageWithButtons(ctx, chatID, renderBacklogCardText(next, hydrated), rows); err != nil {
+		h.logger.Error("telegram review action skip send failed",
+			slog.Int64("chat_id", chatID),
+			slog.String("error", err.Error()))
+		return h.sender.AnswerCallback(ctx, cb.ID, "Error al enviar el siguiente; probá de nuevo")
+	}
+	// Skip the message edit: the new card lives in a fresh
+	// message, the original card's buttons are now stale and the
+	// human can dismiss it. The "Skip" answer tells Telegram the
+	// toast to show above the inline keyboard.
+	return h.sender.AnswerCallback(ctx, cb.ID, "Saltado")
+}
+
+// respondReviewServiceError maps typed app errors and transient
+// service errors to user-friendly Telegram replies. The pattern
+// mirrors the existing handleCallback branch: ErrInvalidTransition
+// and ErrNotFound retire the message (the human cannot recover
+// without re-checking /backlog), and everything else answers with
+// "temporal" without editing (the other buttons on the same card
+// remain actionable while the underlying issue resolves).
+//
+// The verb argument is included in the ERROR log so a future
+// operator can correlate a stack of identical "temporal" answers
+// with the action that produced them.
+func (h *Handler) respondReviewServiceError(ctx context.Context, cb *models.CallbackQuery, chatID int64, messageID int, err error, verb string) error {
+	switch {
+	case errors.Is(err, app.ErrInvalidTransition):
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "⚠️ Este elemento ya cambió de estado. Usá /backlog para ver el actual.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Estado desactualizado")
+	case errors.Is(err, app.ErrNotFound):
+		_ = h.sender.EditMessageText(ctx, chatID, messageID, "⚠️ Este objeto ya no existe.")
+		return h.sender.AnswerCallback(ctx, cb.ID, "Objeto no encontrado")
+	default:
+		h.logger.Error("telegram review action service error",
+			slog.Int64("chat_id", chatID),
+			slog.String("verb", verb),
+			slog.String("error", err.Error()))
+		return h.sender.AnswerCallback(ctx, cb.ID, "Error temporal; probá de nuevo")
 	}
 }
 
