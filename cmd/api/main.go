@@ -34,6 +34,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Fail-closed production invariant (change-16 PR 1): production
+	// must boot with an explicit auth token. Placed BEFORE the uow
+	// selection so a missing token never even reaches the DB pool.
+	if err := enforceProductionAuth(cfg, logger); err != nil {
+		os.Exit(1)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
