@@ -26,26 +26,39 @@ func classifySection(obj domain.KnowledgeObject) domain.SddSectionKey {
 }
 
 // SddDocumentService manages the living SDD document for each workspace. It
-// wires the post-validation hook to the SddDocumentRepository: validated
+// wires the post-validation hook to the SddDocumentUnitOfWork: validated
 // objects are merged into the document; deprecated objects are removed.
+//
+// The write path (AppendValidatedObject) runs inside
+// WithinSddDocumentTx, which holds SELECT ... FOR UPDATE on the
+// row keyed by workspace_id for the duration of the JSONB
+// read-modify-write. Concurrent appends/deprecates on the same
+// workspace therefore serialize on the row lock and never lose
+// entries. The read path (GetDocument) is uncontended and uses the
+// pool-backed SddDocuments() accessor to skip a per-read transaction.
 type SddDocumentService struct {
-	repo   SddDocumentRepository
+	uow    SddDocumentUnitOfWork
 	now    Clock
 	logger *slog.Logger
 }
 
-// NewSddDocumentService returns a service backed by the given repository.
+// NewSddDocumentService returns a service backed by the given unit of work.
 // now is the clock used for entry and document timestamps. logger is used for
 // best-effort hook error logging; it defaults to slog.Default() when nil.
-func NewSddDocumentService(repo SddDocumentRepository, now Clock, logger *slog.Logger) *SddDocumentService {
+func NewSddDocumentService(uow SddDocumentUnitOfWork, now Clock, logger *slog.Logger) *SddDocumentService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &SddDocumentService{repo: repo, now: now, logger: logger}
+	return &SddDocumentService{uow: uow, now: now, logger: logger}
 }
 
 // AppendValidatedObject updates the workspace SDD document when a knowledge
 // object transitions to validated or deprecated.
+//
+// The whole read-modify-write happens inside a single transaction
+// (WithinSddDocumentTx) that holds SELECT ... FOR UPDATE on the
+// row keyed by workspace_id; the lock is released on commit. The
+// tx-scoped repository is the one passed to the callback.
 //
 //   - validated: the entry is removed from all sections (handles type changes),
 //     then appended to the classified section. Each section is kept sorted by
@@ -54,52 +67,59 @@ func NewSddDocumentService(repo SddDocumentRepository, now Clock, logger *slog.L
 //     if absent). The document's UpdatedAt is bumped when an entry was found
 //     and removed.
 func (s *SddDocumentService) AppendValidatedObject(ctx context.Context, obj domain.KnowledgeObject) error {
-	doc, err := s.repo.FindByWorkspace(ctx, obj.WorkspaceID)
-	if err != nil {
-		if err != ErrNotFound {
-			return err
+	return s.uow.WithinSddDocumentTx(ctx, func(ctx context.Context, repo SddDocumentRepository) error {
+		doc, err := repo.FindByWorkspace(ctx, obj.WorkspaceID)
+		if err != nil {
+			if err != ErrNotFound {
+				return err
+			}
+			doc = emptyDocument(obj.WorkspaceID)
 		}
-		doc = emptyDocument(obj.WorkspaceID)
-	}
 
-	switch obj.Status {
-	case domain.KnowledgeObjectStatusValidated:
-		removeByObjectID(&doc, obj.ID)
-		section := classifySection(obj)
-		entry := domain.SddEntry{
-			ObjectID:  obj.ID,
-			Title:     obj.Title,
-			Summary:   obj.Summary,
-			UpdatedAt: s.now().UTC(),
-		}
-		doc.Sections[section] = append(doc.Sections[section], entry)
-		sortSectionDesc(doc.Sections[section])
-		doc.UpdatedAt = s.now().UTC()
-		return s.repo.Upsert(ctx, doc)
+		switch obj.Status {
+		case domain.KnowledgeObjectStatusValidated:
+			removeByObjectID(&doc, obj.ID)
+			section := classifySection(obj)
+			entry := domain.SddEntry{
+				ObjectID:  obj.ID,
+				Title:     obj.Title,
+				Summary:   obj.Summary,
+				UpdatedAt: s.now().UTC(),
+			}
+			doc.Sections[section] = append(doc.Sections[section], entry)
+			sortSectionDesc(doc.Sections[section])
+			doc.UpdatedAt = s.now().UTC()
+			return repo.Upsert(ctx, doc)
 
-	case domain.KnowledgeObjectStatusDeprecated:
-		removed := removeByObjectID(&doc, obj.ID)
-		if !removed {
-			// No entry to remove — treat as no-op but still persist so
-			// the document's updated_at does not drift from reality.
-			// If the doc was ErrNotFound we already initialised an empty doc;
-			// upserting an empty doc is harmless.
+		case domain.KnowledgeObjectStatusDeprecated:
+			removed := removeByObjectID(&doc, obj.ID)
+			if !removed {
+				// No entry to remove — treat as no-op. The service
+				// intentionally does NOT upsert an empty doc here:
+				// when FindByWorkspace returned ErrNotFound we
+				// initialised an empty doc, but the upsert that
+				// would follow adds no information and would race
+				// with a concurrent first-validate. Returning nil
+				// commits an empty tx, which is the cheapest
+				// correct answer for "nothing changed".
+				return nil
+			}
+			doc.UpdatedAt = s.now().UTC()
+			return repo.Upsert(ctx, doc)
+
+		default:
+			// Neither validated nor deprecated — nothing to do.
 			return nil
 		}
-		doc.UpdatedAt = s.now().UTC()
-		return s.repo.Upsert(ctx, doc)
-
-	default:
-		// Neither validated nor deprecated — nothing to do.
-		return nil
-	}
+	})
 }
 
 // GetDocument returns the SDD document for the given workspace. When no
 // document exists yet, it propagates ErrNotFound so read surfaces can return
-// their documented 404/not-found behavior.
+// their documented 404/not-found behavior. The read goes through the
+// pool-backed SddDocuments() accessor — uncontended, no tx needed.
 func (s *SddDocumentService) GetDocument(ctx context.Context, workspaceID string) (domain.SddDocument, error) {
-	doc, err := s.repo.FindByWorkspace(ctx, workspaceID)
+	doc, err := s.uow.SddDocuments().FindByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return domain.SddDocument{}, err
 	}

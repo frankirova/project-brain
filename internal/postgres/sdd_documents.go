@@ -156,3 +156,80 @@ ON CONFLICT (workspace_id) DO UPDATE
 
 // Compile-time interface check.
 var _ app.SddDocumentRepository = (*sddDocumentRepo)(nil)
+var _ app.SddDocumentRepository = (*txSddDocumentRepo)(nil)
+
+// txSddDocumentRepo is the transactional implementation of
+// app.SddDocumentRepository. It is bound to a single pgx.Tx and is
+// handed to a WithinSddDocumentTx callback so the entire JSONB
+// read-modify-write happens under a row-level lock. The lock is
+// acquired by FindByWorkspace (SELECT ... FOR UPDATE) and held until
+// the surrounding transaction commits or rolls back.
+//
+// ErrNotFound semantics are preserved: a missing row returns
+// app.ErrNotFound from FindByWorkspace so the service can fall back
+// to an empty document and proceed to Upsert (which inserts a fresh
+// row via ON CONFLICT). The lock is a no-op on a non-existent row;
+// the INSERT inside Upsert is the only statement that touches the
+// table after a FOR UPDATE miss, so there is no SQL error against a
+// non-existent row.
+type txSddDocumentRepo struct {
+	tx pgx.Tx
+}
+
+// newTxSddDocumentRepo returns a tx-scoped SddDocumentRepository.
+// Used exclusively from WithinSddDocumentTx.
+func newTxSddDocumentRepo(tx pgx.Tx) *txSddDocumentRepo {
+	return &txSddDocumentRepo{tx: tx}
+}
+
+// FindByWorkspace locks the row for the given workspace with
+// SELECT ... FOR UPDATE and returns the current document. Returns
+// app.ErrNotFound when no row exists; the surrounding transaction
+// can then Upsert to create the row. The lock is released when the
+// transaction commits or rolls back.
+func (r *txSddDocumentRepo) FindByWorkspace(ctx context.Context, workspaceID string) (domain.SddDocument, error) {
+	var raw []byte
+	var updatedAt time.Time
+	err := r.tx.QueryRow(ctx, `
+SELECT sections, updated_at
+FROM sdd_documents
+WHERE workspace_id = $1
+FOR UPDATE`, workspaceID).Scan(&raw, &updatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.SddDocument{}, app.ErrNotFound
+		}
+		return domain.SddDocument{}, err
+	}
+	sections, err := unmarshalSections(raw)
+	if err != nil {
+		return domain.SddDocument{}, err
+	}
+	return domain.SddDocument{
+		WorkspaceID: workspaceID,
+		Sections:    sections,
+		UpdatedAt:   updatedAt,
+	}, nil
+}
+
+// Upsert inserts or replaces the SDD document for doc.WorkspaceID
+// inside the surrounding transaction. Identical SQL to
+// sddDocumentRepo.Upsert; lives here so the tx-bound repo is a
+// complete SddDocumentRepository implementation.
+func (r *txSddDocumentRepo) Upsert(ctx context.Context, doc domain.SddDocument) error {
+	raw, err := marshalSections(doc.Sections)
+	if err != nil {
+		return err
+	}
+	_, err = r.tx.Exec(ctx, `
+INSERT INTO sdd_documents (workspace_id, sections, updated_at)
+VALUES ($1, $2::jsonb, $3)
+ON CONFLICT (workspace_id) DO UPDATE
+  SET sections   = EXCLUDED.sections,
+      updated_at = EXCLUDED.updated_at`,
+		doc.WorkspaceID,
+		raw,
+		doc.UpdatedAt,
+	)
+	return err
+}

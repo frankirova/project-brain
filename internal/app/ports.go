@@ -372,6 +372,26 @@ type SddDocumentRepository interface {
 	FindByWorkspace(ctx context.Context, workspaceID string) (domain.SddDocument, error)
 }
 
+// SddDocumentUnitOfWork is the transactional boundary for the SDD
+// document write path. It mirrors the IngestionUnitOfWork /
+// ObjectValidationUnitOfWork shape but is a separate type so the
+// SDD-specific row-lock + JSONB-merge can be added without leaking
+// into the other UoWs. The transaction is owned by the postgres layer
+// (see (*DB).WithinSddDocumentTx); the callback receives a tx-scoped
+// SddDocumentRepository that holds SELECT ... FOR UPDATE on the row
+// keyed by workspace_id for the duration of the callback. The
+// callback MUST return an error to trigger rollback, or nil to commit.
+//
+// SddDocuments is the pool-backed read accessor used outside any
+// transaction (e.g., SddDocumentService.GetDocument). The write path
+// (SddDocumentService.AppendValidatedObject) goes through
+// WithinSddDocumentTx; the read path is uncontended and intentionally
+// skips the transaction to avoid paying for a tx per read.
+type SddDocumentUnitOfWork interface {
+	WithinSddDocumentTx(ctx context.Context, fn func(context.Context, SddDocumentRepository) error) error
+	SddDocuments() SddDocumentRepository
+}
+
 // BacklogQuery is the read-side port for the human backlog. The
 // implementation is the postgres layer (newBacklogQuery), but a
 // fake is used in unit tests so the service can be exercised

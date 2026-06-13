@@ -146,3 +146,47 @@ func (db *DB) WithinObjectDebateTx(ctx context.Context, fn func(context.Context,
 	}
 	return nil
 }
+
+// WithinSddDocumentTx is the transactional boundary for the SDD
+// document write path. It is a mirror of WithinObjectValidationTx:
+// BeginTx → fn(repo) → Commit on nil or Rollback on error. The
+// callback receives a tx-scoped SddDocumentRepository whose
+// FindByWorkspace runs SELECT ... FOR UPDATE on the row keyed by
+// workspace_id, holding the lock until the transaction commits.
+// The JSONB read-modify-write MUST happen inside the same callback
+// so a concurrent validate cannot lose its appended entry.
+func (db *DB) WithinSddDocumentTx(ctx context.Context, fn func(context.Context, app.SddDocumentRepository) error) error {
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		db.logger.Error("begin sdd document tx failed", slog.String("error", err.Error()))
+		return err
+	}
+
+	repo := newTxSddDocumentRepo(tx)
+	if err := fn(ctx, repo); err != nil {
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			db.logger.Error("sdd document rollback failed",
+				slog.String("tx_error", err.Error()),
+				slog.String("rollback_error", rollbackErr.Error()))
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		db.logger.Error("sdd document commit failed",
+			slog.String("error", commitErr.Error()))
+		return commitErr
+	}
+	return nil
+}
+
+// SddDocuments returns a pool-backed SddDocumentRepository. It is the
+// read-side accessor for SddDocumentUnitOfWork: SddDocumentService
+// uses this for GetDocument (the uncontended read path) and uses
+// WithinSddDocumentTx for AppendValidatedObject (the contended
+// write path). The pool is shared with the tx-bound path.
+func (db *DB) SddDocuments() app.SddDocumentRepository {
+	return NewSddDocumentRepo(db.pool)
+}
