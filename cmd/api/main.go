@@ -216,9 +216,31 @@ func main() {
 
 	// Order: auth first, then rate limit, then handler. Rate limit runs
 	// after auth so unauthenticated floods don't consume buckets.
+	//
+	// Transport timeouts. Load() already rejects non-positive values,
+	// so under normal config the panic below is unreachable. It stays
+	// as defense in depth: if a future refactor hands in a zero-value
+	// Config (e.g. in a test), the server MUST NOT start with an
+	// unprotected transport.
+	readHeaderTimeout := cfg.HTTPReadHeaderTimeout()
+	readTimeout := cfg.HTTPReadTimeout()
+	writeTimeout := cfg.HTTPWriteTimeout()
+	idleTimeout := cfg.HTTPIdleTimeout()
+	if readHeaderTimeout <= 0 || readTimeout <= 0 || writeTimeout <= 0 || idleTimeout <= 0 {
+		logger.Error("http transport timeouts must all be > 0",
+			slog.Duration("read_header_timeout", readHeaderTimeout),
+			slog.Duration("read_timeout", readTimeout),
+			slog.Duration("write_timeout", writeTimeout),
+			slog.Duration("idle_timeout", idleTimeout))
+		panic("http transport timeouts must all be > 0")
+	}
 	server := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: rootMux,
+		Addr:              ":" + cfg.Port,
+		Handler:           rootMux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	go func() {
