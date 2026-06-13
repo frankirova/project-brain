@@ -49,18 +49,18 @@ Source + KnowledgeObject + ObjectSource + AuditEvent. El test `TestIngestDoesNot
 
 ---
 
-## 🔄 Fase 2 — Hybrid RAG (siguiente)
+## ✅ Fase 2 — Hybrid RAG (completa)
 
 El objetivo: que el bot no solo guarde conocimiento, sino que **detecte colisiones** con conocimiento existente y proponga acciones.
 
-### Cambios planeados
+### Cambios entregados
 
 | # | Cambio | Capacidad | Esfuerzo | Estado |
 |---|--------|-----------|----------|--------|
-| 6 | `embeddings-pgvector` | `vector-similarity-search` | Medium | Backlog |
-| 7 | `fts-search-api` | `keyword-search` | Low | Backlog |
-| 8 | `hybrid-retrieval` | `hybrid-rag` (combina FTS + vector + structured) | High | Backlog |
-| 9 | `relation-traversal` | `graph-expansion` (queries por relaciones) | Medium | Backlog |
+| 6 | `embeddings-pgvector` | `vector-similarity-search` | Medium | ✅ Archived |
+| 7 | `fts-search-api` | `keyword-search` | Low | ✅ Archived |
+| 8 | `hybrid-retrieval` | `hybrid-rag` (combina FTS + vector + structured) | High | ✅ Archived |
+| 9 | `relation-traversal` | `graph-expansion` (queries por relaciones) | Medium | ✅ Archived |
 
 ### Lo que habilita
 
@@ -71,7 +71,7 @@ El objetivo: que el bot no solo guarde conocimiento, sino que **detecte colision
 
 ---
 
-## 🎯 Fase 3 — Human-in-the-Loop Validation (la que charlamos arriba)
+## ✅ Fase 3 — Human-in-the-Loop Validation (completa)
 
 Esta es la fase donde Project Brain deja de ser "lugar para tirar notas" y se convierte en **plataforma de conocimiento con workflow**. El bot no solo guarda: propone, cuestiona, y espera validación humana.
 
@@ -132,9 +132,9 @@ Cuando dos personas mandan ideas contradictorias sobre el mismo proyecto, ¿qué
 |---|--------|-----------|----------|--------|
 | 10 | `raw-inputs-table` | `raw-input-capture` | Low | ✅ Archived |
 | 12 | `knowledge-states` | `node-lifecycle` (`proposed → validated`, `proposed → deprecated`) | Medium | ✅ Archived |
-| 13 | `sdd-documents` | `consolidated-sdd` (documento maestro actualizado por nodos validados) | High | Backlog |
-| 14 | `human-loop-orchestrator` | `validation-workflow` (diseña `debating` y orquesta bot → humano → commit) | High | Backlog |
-| 15 | `telegram-validation-ui` | `telegram-inline-keyboards` (botones de validar/debatir/descartar) | Low | Backlog |
+| 13 | `sdd-documents` | `consolidated-sdd` (documento maestro actualizado por nodos validados) | High | 🔜 Next |
+| 14 | `human-loop-orchestrator` | `validation-workflow` (`debating` lifecycle + human backlog + debate resolution) | High | ✅ Archived |
+| 15 | `telegram-validation-ui` | `telegram-inline-keyboards` (botones de validar/debatir/descartar) | Low | ✅ Archived |
 
 ### Por qué NO empezar por acá todavía
 
@@ -178,24 +178,12 @@ Esto es lo que define `PROJECT_BRAIN.md` sección 8. Los agentes especializados 
 
 ```
 [✅] Fase 1: Foundation (5 cambios archived + 2 sprints de calidad)
-[🚀] Fase 2: Hybrid RAG (en curso)
-[ ]  Fase 3: Human-in-the-Loop Validation
+[✅] Fase 2: Hybrid RAG (4 cambios archived)
+[✅] Fase 3: Human-in-the-Loop Validation (changes 10,12,14,15 archived — change 13 pendiente)
 [ ]  Fase 4: Multi-agent Platform
 ```
 
-**Fase 2 progreso:**
-- ✅ `Retriever` port (C4 cerrado)
-- ✅ `FTSRetriever` + endpoint `GET /v1/search`
-- ✅ Embeddings con pgvector (migration 0007, EmbeddingRepo, vectorRetriever)
-- ✅ `CompositeRetriever` con Reciprocal Rank Fusion (merge FTS + vector)
-- ✅ Hydration del composite (ObjectHydrator interface + FTSRetriever.FindByID)
-- ✅ `/v1/objects/{id}` endpoint
-- ✅ Wire del composite en main.go (Gemini key → hybrid; no key → FTS-only)
-- ✅ Integration tests del `vectorRetriever` + `EmbeddingRepo` contra Postgres real (`embeddings_integration_test.go`: 3 tests env-gated)
-
-**Fase 1 cerrado** con 5 cambios archived + **dos sprints de calidad** (slog, rate limit, auth, CI, .gitattributes, fix del test de relations + 25 commits del audit post-Fase 1).
-
-La fundación está lista. Los blockers arquitecturales (status enum, Update method, FTS con tags, queries determinísticas, XFF spoofing, graceful shutdown, etc.) están resueltos.
+**Siguiente:** Change 13 `sdd-documents` — documento maestro consolidado.
 
 ---
 
@@ -230,7 +218,7 @@ Resultados del audit post-Fase 1 con estado actual.
 | ID | Hallazgo | Estado |
 |---|---|---|
 | H1 | FTS no indexaba `tags`, `'simple'` permanente | ✅ Parcial: tags incluidos con pesos A/B/B/C en migration 0006; per-row language sigue diferido |
-| H2 | Duplicates no dejan audit trail | ⏳ Pendiente: escribir `AuditActionKnowledgeDuplicateDetected` o documentar contract |
+| H2 | Duplicates no dejan audit trail | ✅ Resuelto: `AuditActionKnowledgeDuplicateDetected` escrito dentro de la tx al detectar duplicate en `IngestTextService` |
 | H3 | `FindIngestionResultByIdentityKey` query non-deterministic | ✅ Resuelto: subquery con `ORDER BY id LIMIT 1` |
 | H4 | Auth middleware concatenaba JSON manualmente | ✅ Resuelto: `json.Marshal` con struct tipado |
 | H5 | Rate limit confiaba en `X-Forwarded-For` sin verificar | ✅ Resuelto: `PROJECT_BRAIN_TRUST_PROXY` flag, default false |
@@ -249,7 +237,7 @@ Resultados del audit post-Fase 1 con estado actual.
 | M5 | `json.NewEncoder.Encode` ignora error | ✅ Resuelto: 3 sites con log en fallo |
 | M6 | `audit_events` schema insuficiente para Fase 3 | 🟡 Schema listo (migration 0005), wire pendiente en código de aplicación |
 | M7 | Rate limit sin cap superior | ✅ Resuelto: cap 1000 RPS / 10000 burst |
-| M8 | `AuditEvent` sin `Metadata` para context extra | ⏳ Pendiente: agregar `Metadata domain.Metadata` al struct |
+| M8 | `AuditEvent` sin `Metadata` para context extra | ✅ Resuelto: `Metadata domain.Metadata` existe en `domain.AuditEvent` (migration 0005) |
 | M9 | `repositories` no expone `Relations()` pero `DB` sí | ✅ Resuelto: doc comment explica la asimetría |
 | M10 | Two-step init en Telegram | ✅ Resuelto: `SetBot` removido, bot se inyecta lazy via `DefaultHandler` |
 | M11 | `ProcessUpdate` ignora `update.CallbackQuery` | 🟡 Stub agregado (log + ack), handler real con Fase 3 |

@@ -103,7 +103,20 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 		if err == nil {
 			existing.Duplicate = true
 			result = existing
-			return nil
+			dupAudit := domain.AuditEvent{
+				ID:          s.ids(),
+				WorkspaceID: prepared.workspaceID,
+				ActorID:     strings.TrimSpace(prepared.object.CreatedBy),
+				Action:      domain.AuditActionKnowledgeDuplicateDetected,
+				TargetType:  domain.AuditTargetKnowledgeObject,
+				TargetID:    existing.ObjectID,
+				After: domain.Metadata{
+					"identity_key":      prepared.identityKey,
+					"original_audit_id": existing.AuditEventID.String(),
+				},
+				CreatedAt: s.now().UTC(),
+			}
+			return repos.AuditEvents().Create(ctx, dupAudit)
 		}
 		if !errors.Is(err, ErrNotFound) {
 			return err

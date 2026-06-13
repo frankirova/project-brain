@@ -122,8 +122,19 @@ func TestIngestReturnsDuplicateWithoutCreatingRecords(t *testing.T) {
 	if result.ContentChecksum != existing.ContentChecksum || result.IdentityKey != existing.IdentityKey {
 		t.Fatalf("result checksum/identity = %q/%q, want persisted %q/%q", result.ContentChecksum, result.IdentityKey, existing.ContentChecksum, existing.IdentityKey)
 	}
-	if uow.repos.writeCount() != 0 {
-		t.Fatalf("writes=%d, want no duplicate writes", uow.repos.writeCount())
+	// Source, object, and link must not be created on a duplicate tap.
+	if got := len(uow.repos.source.created) + len(uow.repos.object.created) + len(uow.repos.link.created); got != 0 {
+		t.Fatalf("source/object/link writes=%d, want 0 on duplicate", got)
+	}
+	// One duplicate-detected audit event must be written.
+	if got := len(uow.repos.audit.created); got != 1 {
+		t.Fatalf("audit writes=%d, want 1 on duplicate", got)
+	}
+	if got := uow.repos.audit.created[0].Action; got != domain.AuditActionKnowledgeDuplicateDetected {
+		t.Fatalf("audit action=%q, want %q", got, domain.AuditActionKnowledgeDuplicateDetected)
+	}
+	if got := uow.repos.audit.created[0].TargetID; got != existing.ObjectID {
+		t.Fatalf("audit target=%v, want %v", got, existing.ObjectID)
 	}
 }
 
