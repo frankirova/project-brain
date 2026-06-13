@@ -16,9 +16,9 @@ import (
 
 func TestClassifySection(t *testing.T) {
 	cases := []struct {
-		name     string
-		objType  string
-		wantKey  domain.SddSectionKey
+		name    string
+		objType string
+		wantKey domain.SddSectionKey
 	}{
 		{"decision -> decisions", domain.KnowledgeObjectTypeDecision, domain.SddSectionDecisions},
 		{"constraint -> constraints", domain.KnowledgeObjectTypeConstraint, domain.SddSectionConstraints},
@@ -169,12 +169,12 @@ func TestAppendValidatedObject_SortedByUpdatedAtDesc(t *testing.T) {
 	svc := NewSddDocumentService(repo, clk, nil)
 
 	obj1 := domain.KnowledgeObject{
-		ID: uuid.MustParse("00000000-0000-0000-0000-000000000010"),
+		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000010"),
 		WorkspaceID: "ws-1", Type: domain.KnowledgeObjectTypeDecision,
 		Title: "older", Status: domain.KnowledgeObjectStatusValidated,
 	}
 	obj2 := domain.KnowledgeObject{
-		ID: uuid.MustParse("00000000-0000-0000-0000-000000000011"),
+		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000011"),
 		WorkspaceID: "ws-1", Type: domain.KnowledgeObjectTypeDecision,
 		Title: "newer", Status: domain.KnowledgeObjectStatusValidated,
 	}
@@ -230,7 +230,7 @@ func TestAppendValidatedObject_DeprecateAbsentIsNoOp(t *testing.T) {
 
 	// Seed a different object so the document exists.
 	seed := domain.KnowledgeObject{
-		ID: uuid.MustParse("00000000-0000-0000-0000-000000000030"),
+		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000030"),
 		WorkspaceID: "ws-1", Type: domain.KnowledgeObjectTypeDecision,
 		Title: "keep", Status: domain.KnowledgeObjectStatusValidated,
 	}
@@ -240,7 +240,7 @@ func TestAppendValidatedObject_DeprecateAbsentIsNoOp(t *testing.T) {
 
 	// Deprecate an object that was never validated.
 	absent := domain.KnowledgeObject{
-		ID: uuid.MustParse("00000000-0000-0000-0000-000000000031"),
+		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000031"),
 		WorkspaceID: "ws-1", Type: domain.KnowledgeObjectTypeDecision,
 		Status: domain.KnowledgeObjectStatusDeprecated,
 	}
@@ -259,7 +259,7 @@ func TestAppendValidatedObject_DeprecateEmptyDocIsNoOp(t *testing.T) {
 	svc := NewSddDocumentService(repo, fixedNow, nil)
 
 	obj := domain.KnowledgeObject{
-		ID: uuid.MustParse("00000000-0000-0000-0000-000000000040"),
+		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000040"),
 		WorkspaceID: "ws-1", Type: domain.KnowledgeObjectTypeDecision,
 		Status: domain.KnowledgeObjectStatusDeprecated,
 	}
