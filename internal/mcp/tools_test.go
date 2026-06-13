@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/frankirova/project-brain/internal/app"
 )
 
 // fakeAPI records calls and returns canned responses.
@@ -14,6 +17,8 @@ type fakeAPI struct {
 	collisionWS, collisionText string
 	ingestWS, ingestContent    string
 	ingestType, ingestTitle    string
+	sddWS, sddMarkdown         string
+	sddErr                     error
 	err                        error
 }
 
@@ -32,20 +37,31 @@ func (f *fakeAPI) Ingest(_ context.Context, ws, content, objType, title string) 
 	return json.RawMessage(`{"object_id":"x"}`), f.err
 }
 
+func (f *fakeAPI) GetSddDocument(_ context.Context, ws string) (string, error) {
+	f.sddWS = ws
+	if f.sddErr != nil {
+		return "", f.sddErr
+	}
+	if f.sddMarkdown != "" {
+		return f.sddMarkdown, nil
+	}
+	return "# SDD Document — " + ws + "\n", nil
+}
+
 func toolByName(s *Server, name string) registeredTool {
 	return s.tools[name]
 }
 
-func TestRegisterDefaultToolsRegistersThree(t *testing.T) {
+func TestRegisterDefaultToolsRegistersDefaultTools(t *testing.T) {
 	s := NewServer("x", "1", nil)
 	RegisterDefaultTools(s, &fakeAPI{}, "default")
-	for _, name := range []string{"search_knowledge", "check_collision", "save_knowledge"} {
+	for _, name := range []string{"search_knowledge", "check_collision", "save_knowledge", "get_sdd_document"} {
 		if _, ok := s.tools[name]; !ok {
 			t.Errorf("missing tool %q", name)
 		}
 	}
-	if len(s.order) != 3 {
-		t.Errorf("order = %d, want 3", len(s.order))
+	if len(s.order) != 4 {
+		t.Errorf("order = %d, want 4", len(s.order))
 	}
 }
 
@@ -118,5 +134,65 @@ func TestToolPropagatesAPIError(t *testing.T) {
 	_, err := toolByName(s, "check_collision").handler(context.Background(), map[string]any{"content": "x"})
 	if err == nil {
 		t.Fatal("expected API error to propagate")
+	}
+}
+
+func TestGetSddDocumentToolRegistered(t *testing.T) {
+	s := NewServer("x", "1", nil)
+	RegisterDefaultTools(s, &fakeAPI{}, "default")
+	if _, ok := s.tools["get_sdd_document"]; !ok {
+		t.Fatal("get_sdd_document tool not registered")
+	}
+	if len(s.order) != 4 {
+		t.Errorf("order = %d, want 4 tools", len(s.order))
+	}
+}
+
+func TestGetSddDocumentToolReturnsMarkdown(t *testing.T) {
+	api := &fakeAPI{sddMarkdown: "# SDD Document — ws-acme\n\n## Context\n\n_(none)_\n"}
+	s := NewServer("x", "1", nil)
+	RegisterDefaultTools(s, api, "ws-acme")
+
+	result, err := toolByName(s, "get_sdd_document").handler(context.Background(), map[string]any{
+		"workspace_id": "ws-acme",
+	})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if !strings.Contains(result, "# SDD Document") {
+		t.Errorf("result missing H1 heading; got: %s", result)
+	}
+	if api.sddWS != "ws-acme" {
+		t.Errorf("workspace = %q, want ws-acme", api.sddWS)
+	}
+}
+
+func TestGetSddDocumentToolUsesDefaultWorkspace(t *testing.T) {
+	api := &fakeAPI{}
+	s := NewServer("x", "1", nil)
+	RegisterDefaultTools(s, api, "my-default")
+
+	_, err := toolByName(s, "get_sdd_document").handler(context.Background(), map[string]any{})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if api.sddWS != "my-default" {
+		t.Errorf("workspace = %q, want my-default (default)", api.sddWS)
+	}
+}
+
+func TestGetSddDocumentToolReturnsNotFoundString(t *testing.T) {
+	api := &fakeAPI{sddErr: app.ErrNotFound}
+	s := NewServer("x", "1", nil)
+	RegisterDefaultTools(s, api, "default")
+
+	result, err := toolByName(s, "get_sdd_document").handler(context.Background(), map[string]any{
+		"workspace_id": "missing-ws",
+	})
+	if err != nil {
+		t.Fatalf("handler should not propagate error; got: %v", err)
+	}
+	if !strings.Contains(result, "no SDD document found") {
+		t.Errorf("result = %q, want 'no SDD document found...' message", result)
 	}
 }

@@ -3,11 +3,14 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/frankirova/project-brain/internal/app"
 )
 
 func TestClientSearchBuildsRequest(t *testing.T) {
@@ -93,5 +96,45 @@ func TestClientNon2xxReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "400") {
 		t.Errorf("error should mention status: %v", err)
+	}
+}
+
+func TestClientGetSddDocument200(t *testing.T) {
+	const markdown = "# SDD Document — ws-1\n\n## Context\n\n_(none)_\n"
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.RequestURI()
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte(markdown))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok")
+	got, err := c.GetSddDocument(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("GetSddDocument: %v", err)
+	}
+	if got != markdown {
+		t.Errorf("body = %q, want %q", got, markdown)
+	}
+	if !strings.Contains(gotPath, "workspace_id=ws-1") {
+		t.Errorf("path missing workspace_id; got %s", gotPath)
+	}
+}
+
+func TestClientGetSddDocument404ReturnsErrNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"NOT_FOUND","message":"no SDD document found for workspace missing"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "")
+	_, err := c.GetSddDocument(context.Background(), "missing")
+	if err == nil {
+		t.Fatal("expected error on 404")
+	}
+	if !errors.Is(err, app.ErrNotFound) {
+		t.Errorf("want app.ErrNotFound, got %v", err)
 	}
 }
