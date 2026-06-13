@@ -9,7 +9,7 @@ Estado vivo del proyecto. Fases completadas colapsadas; solo queda lo pendiente.
 ```
 [✅] Fase 1: Foundation        — ingest, FTS, relaciones, auditoría, idempotencia
 [✅] Fase 2: Hybrid RAG         — embeddings, vector search, composite retrieval, collision detection
-[✅] Fase 3: Human-in-the-Loop  — raw inputs, lifecycle, backlog, debate, Telegram UI
+[✅] Fase 3: Human-in-the-Loop  — raw inputs, lifecycle, backlog, debate, Telegram UI, consolidated SDD
 [ ]  Fase 4: Multi-agent Platform
 ```
 
@@ -17,9 +17,17 @@ Estado vivo del proyecto. Fases completadas colapsadas; solo queda lo pendiente.
 
 ---
 
-## 🔜 Próximo — Change 13: `sdd-documents`
+## ✅ Último entregado — Change 13: `sdd-documents`
 
 **Capacidad**: `consolidated-sdd` — documento maestro que se actualiza cuando knowledge objects pasan a `validated`.
+
+**Estado**: mergeado en `main` vía PR #13.
+
+---
+
+## 🔜 Próximo — Fase 4: Multi-agent Platform
+
+**Primer candidato**: `event-driven-pipeline` — base NATS para coordinar agentes y procesamiento asíncrono.
 
 **Esfuerzo**: High — requiere SDD completo.
 
