@@ -21,6 +21,21 @@ const (
 	SourceTypeText              = "text"
 	KnowledgeObjectTypeDocument = "document"
 
+	// KnowledgeObjectTypeDecision marks objects that record an explicit
+	// architectural or product decision. Validated objects of this type are
+	// placed in the SddSectionDecisions section of the workspace SDD document.
+	KnowledgeObjectTypeDecision = "decision"
+
+	// KnowledgeObjectTypeConstraint marks objects that describe a hard
+	// constraint (technical, legal, organisational, etc.). Validated objects
+	// of this type are placed in the SddSectionConstraints section.
+	KnowledgeObjectTypeConstraint = "constraint"
+
+	// KnowledgeObjectTypeOpenQuestion marks objects that capture an
+	// unanswered question or unresolved design concern. Validated objects of
+	// this type are placed in the SddSectionOpenQuestions section.
+	KnowledgeObjectTypeOpenQuestion = "open_question"
+
 	// KnowledgeObjectStatus is the lifecycle of a knowledge object.
 	// Mirrors the CHECK constraint on knowledge_objects.status
 	// (migrations/0005_lifecycle_and_audit_richness.sql).
