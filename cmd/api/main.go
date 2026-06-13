@@ -113,11 +113,14 @@ func main() {
 		backlogHandler = httpapi.NewBacklogHandler(backlogSvc)
 		validateSvc = app.NewValidateObjectService(pgDB)
 
-		// SDD document write + read path. The repo and service are
-		// constructed once and shared by the HTTP handler and the
-		// post-validation hooks on validateSvc.
-		sddRepo := postgres.NewSddDocumentRepo(pgDB.Pool())
-		sddSvc := app.NewSddDocumentService(sddRepo, time.Now, logger)
+		// SDD document write + read path. The service is built
+		// directly on the *postgres.DB because the DB now satisfies
+		// app.SddDocumentUnitOfWork (it exposes WithinSddDocumentTx
+		// for the contended write path and SddDocuments() for the
+		// pool-backed read path). The row-locked JSONB merge runs
+		// inside WithinSddDocumentTx so concurrent appends on the
+		// same workspace_id never lose entries.
+		sddSvc := app.NewSddDocumentService(pgDB, time.Now, logger)
 		sddDocumentHandler = httpapi.NewSddDocumentHandler(sddSvc)
 		validateSvc.SetPostValidationHook(sddSvc.AppendValidatedObject)
 		validateSvc.SetPostDeprecationHook(sddSvc.AppendValidatedObject)

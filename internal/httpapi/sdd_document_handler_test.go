@@ -41,8 +41,29 @@ func (s *sddDocumentGetterStub) GetDocument(_ context.Context, _ string) (domain
 // newSddServiceWithStub builds a real SddDocumentService backed by the given stub.
 func newSddServiceWithStub(doc domain.SddDocument, repoErr error) *app.SddDocumentService {
 	repo := &sddDocumentRepoStub{doc: doc, err: repoErr}
-	return app.NewSddDocumentService(repo, func() time.Time { return time.Now() }, nil)
+	// Wrap the stub in a UoW adapter so the service sees a real
+	// SddDocumentUnitOfWork. WithinSddDocumentTx runs the callback
+	// synchronously; SddDocuments returns the same stub. The stub
+	// only carries a single doc+err so it works for both surfaces.
+	uow := &stubSddDocUOW{repo: repo}
+	return app.NewSddDocumentService(uow, func() time.Time { return time.Now() }, nil)
 }
+
+// stubSddDocUOW adapts a SddDocumentRepository to SddDocumentUnitOfWork
+// for handler tests. Both surfaces return the same repo, which is
+// fine because the stub only models a single workspace's read or
+// write outcome.
+type stubSddDocUOW struct {
+	repo app.SddDocumentRepository
+}
+
+func (u *stubSddDocUOW) WithinSddDocumentTx(ctx context.Context, fn func(context.Context, app.SddDocumentRepository) error) error {
+	return fn(ctx, u.repo)
+}
+
+func (u *stubSddDocUOW) SddDocuments() app.SddDocumentRepository { return u.repo }
+
+var _ app.SddDocumentUnitOfWork = (*stubSddDocUOW)(nil)
 
 func TestSddDocumentHandler_MissingWorkspaceID(t *testing.T) {
 	svc := newSddServiceWithStub(domain.SddDocument{}, nil)
