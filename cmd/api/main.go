@@ -174,10 +174,28 @@ func main() {
 
 	handler := httpapi.NewIngestTextHandler(svc, cfg.IngestMaxBytes)
 
-	// Public mux: only the health probe. No auth, no rate limit — health
-	// must work even when the service is being abused or auth is broken.
+	// Readiness probes: built from the same dependencies the public mux
+	// has. When a Postgres backend is wired we add a DB ping (the only
+	// hard dependency on the readiness path for Fase 3); in-memory mode
+	// has no probes, which the readiness handler treats as "ready"
+	// (no dependencies to check). Workers/queues (Fase 4) will be
+	// appended here when they land.
+	var readinessProbes []httpapi.ReadinessProbe
+	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
+		pool := pgDB.Pool()
+		readinessProbes = append(readinessProbes, func(ctx context.Context) error {
+			return pool.Ping(ctx)
+		})
+	}
+
+	// Public mux: only the health probes. No auth, no rate limit —
+	// health must work even when the service is being abused or auth
+	// is broken. The kubelet cannot present a bearer token, so the
+	// /v1/readiness endpoint is intentionally unauthenticated.
 	publicMux := http.NewServeMux()
 	publicMux.Handle("GET /v1/health", &httpapi.HealthHandler{})
+	publicMux.Handle("GET /v1/liveness", httpapi.NewLivenessHandler())
+	publicMux.Handle("GET /v1/readiness", httpapi.NewReadinessHandler(0, readinessProbes...))
 
 	// Protected mux: ingest endpoint goes through auth then rate limit.
 	// Search and object endpoints are also protected (they read tenant
