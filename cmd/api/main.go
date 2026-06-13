@@ -83,12 +83,20 @@ func main() {
 	// can reuse it for the human-in-the-loop validation flow. Stays nil
 	// when vector search is off.
 	var collisionDetector *app.CollisionDetector
+	// ftsRetriever, backlogSvc, and validateSvc are hoisted so the
+	// Telegram composition root (built after this block) can inject
+	// them into NewHandlerWithBacklogAndReview. All three stay nil
+	// when no Postgres backend is available; the handler propagates
+	// nils as "not configured" gracefully.
+	var ftsRetriever *postgres.FTSRetriever
+	var backlogSvc *app.ObjectDebateService
+	var validateSvc *app.ValidateObjectService
 	// retryDone is closed when the embedding retry worker goroutine
 	// exits. nil when the worker is not wired (in-memory mode or no
 	// Gemini key); shutdown blocks on it only when set.
 	var retryDone <-chan struct{}
 	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
-		ftsRetriever := postgres.NewFTSRetriever(pgDB.Pool())
+		ftsRetriever = postgres.NewFTSRetriever(pgDB.Pool())
 		objectHandler = httpapi.NewObjectHandler(ftsRetriever)
 
 		// Human backlog read path (change 14, PR 3). The query is
@@ -97,8 +105,9 @@ func main() {
 		// service. BacklogHandler is built unconditionally inside
 		// the postgres branch because the service depends on the
 		// pool even when there is no Gemini key.
-		backlogSvc := app.NewObjectDebateService(pgDB, postgres.NewBacklogQuery(pgDB.Pool()))
+		backlogSvc = app.NewObjectDebateService(pgDB, postgres.NewBacklogQuery(pgDB.Pool()))
 		backlogHandler = httpapi.NewBacklogHandler(backlogSvc)
+		validateSvc = app.NewValidateObjectService(pgDB)
 
 		if cfg.GeminiAPIKey != "" {
 			embedder := gemini.NewEmbedder(cfg.GeminiAPIKey)
@@ -223,6 +232,8 @@ func main() {
 		var tgStore app.PendingValidationStore
 		var pgStore *postgres.PendingValidationStore
 		var rawInputRepo app.RawInputRepository // nil when no postgres backend
+		var tgReviewStore app.TelegramReviewActionStore
+		var pgReviewStore *postgres.TelegramReviewActionStore
 		if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
 			pgStore = postgres.NewPendingValidationStore(pgDB.Pool())
 			tgStore = pgStore
@@ -239,15 +250,30 @@ func main() {
 				logger.Info("telegram pending validation sweep reaped rows",
 					slog.Int64("count", reaped))
 			}
+
+			pgReviewStore = postgres.NewTelegramReviewActionStore(pgDB.Pool())
+			tgReviewStore = pgReviewStore
+			reviewReaped, reviewErr := pgReviewStore.SweepExpired(ctx)
+			if reviewErr != nil {
+				logger.Warn("telegram review action sweep failed",
+					slog.String("error", reviewErr.Error()))
+			} else if reviewReaped > 0 {
+				logger.Info("telegram review action sweep reaped rows",
+					slog.Int64("count", reviewReaped))
+			}
 		}
 		// Pass a true nil interface when no detector exists — handing a
 		// typed-nil *app.CollisionDetector would make the handler's nil
 		// check fail and panic on the first message.
+		// backlogSvc satisfies both backlogLister and reviewDebator.
+		// validateSvc and ftsRetriever are nil when no Postgres backend
+		// is available; the handler answers "no disponible" for those
+		// buttons rather than panicking.
 		var tgHandler *telegram.Handler
 		if collisionDetector != nil {
-			tgHandler = telegram.NewHandlerWithStore(svc, collisionDetector, rawInputRepo, nil, logger, tgStore)
+			tgHandler = telegram.NewHandlerWithBacklogAndReview(svc, collisionDetector, rawInputRepo, nil, logger, tgStore, backlogSvc, ftsRetriever, tgReviewStore, validateSvc, backlogSvc)
 		} else {
-			tgHandler = telegram.NewHandlerWithStore(svc, nil, rawInputRepo, nil, logger, tgStore)
+			tgHandler = telegram.NewHandlerWithBacklogAndReview(svc, nil, rawInputRepo, nil, logger, tgStore, backlogSvc, ftsRetriever, tgReviewStore, validateSvc, backlogSvc)
 		}
 		b, err := tgbot.New(cfg.TelegramBotToken,
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),
