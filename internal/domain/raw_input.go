@@ -15,7 +15,7 @@ type RawInput struct {
 	Channel          string
 	Content          string
 	ActorID          string
-	ExternalRef      Metadata   // JSONB; always non-nil on write (defaults to {})
+	ExternalRef      Metadata // JSONB; always non-nil on write (defaults to {})
 	Status           string
 	PromotedObjectID *uuid.UUID // non-nil iff status == "promoted"
 	CollisionSummary Metadata   // nullable; nil => SQL NULL
