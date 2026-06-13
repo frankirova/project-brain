@@ -11,29 +11,35 @@ Estado vivo del proyecto. Fases completadas colapsadas; solo queda lo pendiente.
 [✅] Fase 2: Hybrid RAG         — embeddings, vector search, composite retrieval, collision detection
 [✅] Fase 3: Human-in-the-Loop  — raw inputs, lifecycle, backlog, debate, Telegram UI, consolidated SDD
 [ ]  Fase 4: Multi-agent Platform
+[ ]  Hardening: production-readiness (ver abajo)
 ```
 
 **Sistema actual**: ingest vía HTTP + Telegram → collision detection → human backlog → validar/debatir/descartar vía inline keyboards → lifecycle auditado en Postgres.
 
 ---
 
-## ✅ Último entregado — Change 13: `sdd-documents`
+## 🔜 Próximo — Hardening batch (producción)
 
-**Capacidad**: `consolidated-sdd` — documento maestro que se actualiza cuando knowledge objects pasan a `validated`.
+Auditoría reciente identificó riesgos de producción que preceden a Fase 4. Conviene vaciar esto antes de introducir agentes.
 
-**Estado**: mergeado en `main` vía PR #13.
+| Prioridad | Hallazgo | Acción propuesta |
+|---|---|---|
+| CRITICAL | Auth puede quedar desactivada en producción si `PROJECT_BRAIN_AUTH_TOKEN` está vacío | Fail-closed en production: exigir token si `PROJECT_BRAIN_ENV=production` |
+| HIGH | HTTP server sin `ReadHeaderTimeout` / `ReadTimeout` / `WriteTimeout` / `IdleTimeout` | Configurar timeouts en `cmd/api/main.go` y testearlos |
+| HIGH | `SddDocument` hace read-modify-write JSONB fuera de tx de validación — pierde updates concurrentes | Mover upsert dentro de la tx, lock por `workspace_id`, o versionado optimista |
+| HIGH | `/v1/health` es solo liveness, no readiness | Separar `/health`, `/readiness`, `/liveness` (readiness checkea DB, workers, queues) |
+| MEDIUM | `gofmt` drift en `internal/domain/raw_input.go` y `internal/telegram/handler_test.go` | `gofmt -w` y commit dedicado |
+| MEDIUM | `cmd/api` 0% coverage | Tests de wiring crítico en composition root |
+| MEDIUM | Postgres integration tests quedan skipped en `-short` | Mantener DSN-gated, asegurar CI con DB real |
+| MEDIUM | No hay CI visible en `.github/**` | Agregar workflow mínimo: `go test -short`, `go vet`, `gofmt -l` |
+
+**Esfuerzo**: Medium — varios PRs chicos, idealmente chained para mantener budget.
 
 ---
 
-## 🔜 Próximo — Fase 4: Multi-agent Platform
+## 🔮 Después — Fase 4: Multi-agent Platform
 
-**Primer candidato**: `event-driven-pipeline` — base NATS para coordinar agentes y procesamiento asíncrono.
-
-**Esfuerzo**: High — requiere SDD completo.
-
----
-
-## 🔮 Fase 4 — Multi-agent Platform
+Una vez vacío el hardening batch.
 
 | Agente | Responsabilidad |
 |--------|-----------------|
@@ -54,6 +60,9 @@ Cambios estimados: `event-driven-pipeline` (NATS), `agent-framework`, `prompt-re
 - [ ] Decidir si agregar índice en `project_id` cuando exista la tabla `projects`
 - [ ] Evaluar `confidence` negativo: ¿rechazar en app o confiar en el DB?
 - [ ] Considerar `'spanish'` o `'english'` tsvector config por-objeto (hoy es `'simple'` para bilingual MVP)
+- [ ] Envelope de error uniforme (RFC7807) en HTTP
+- [ ] Security headers globales en HTTP middleware
+- [ ] Refactor progresivo de `cmd/api/main.go` para dividir composition root
 
 ---
 
@@ -67,6 +76,10 @@ Cambios estimados: `event-driven-pipeline` (NATS), `agent-framework`, `prompt-re
 | M13 | `RelationRepository` mezclado en `ports.go` | ⏳ Bajo valor, skip |
 | L2 | Helpers `nullable*` triviales | ⏳ Bajo valor, skip |
 | L5 | Checksum format inconsistente | ⏳ Documentar (no normalizar) |
+| H2 | Auth fail-open si falta token | 🟠 En hardening batch |
+| H3 | HTTP server sin timeouts | 🟠 En hardening batch |
+| H4 | SDD document update concurrente | 🟠 En hardening batch |
+| H5 | Health sin readiness | 🟠 En hardening batch |
 
 ---
 
