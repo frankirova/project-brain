@@ -198,3 +198,154 @@ func (r *fakeValidationAuditRepo) Create(_ context.Context, event domain.AuditEv
 	r.created = append(r.created, event)
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4.5 — hook tests
+// ---------------------------------------------------------------------------
+
+func TestValidateObject_PostValidationHookCalledWithFullObject(t *testing.T) {
+	objectID := uuid.MustParse("00000000-0000-0000-0000-000000000401")
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+
+	uow := newFakeValidationUOW(domain.KnowledgeObject{
+		ID:          objectID,
+		WorkspaceID: "ws-hook",
+		Type:        domain.KnowledgeObjectTypeDecision,
+		Title:       "T",
+		Summary:     "S",
+		Status:      domain.KnowledgeObjectStatusProposed,
+	})
+	svc := NewValidateObjectServiceWithDependencies(uow, uuid.New, func() time.Time { return now })
+
+	var hookObj domain.KnowledgeObject
+	svc.SetPostValidationHook(func(_ context.Context, obj domain.KnowledgeObject) error {
+		hookObj = obj
+		return nil
+	})
+
+	result, err := svc.Validate(context.Background(), ValidateObjectRequest{
+		WorkspaceID:  "ws-hook",
+		ObjectID:     objectID,
+		TargetStatus: domain.KnowledgeObjectStatusValidated,
+	})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if result.Status != domain.KnowledgeObjectStatusValidated {
+		t.Fatalf("result.Status = %q, want validated", result.Status)
+	}
+	if hookObj.ID != objectID {
+		t.Errorf("hook received object ID %v, want %v", hookObj.ID, objectID)
+	}
+	if hookObj.Status != domain.KnowledgeObjectStatusValidated {
+		t.Errorf("hook object.Status = %q, want validated", hookObj.Status)
+	}
+	if !hookObj.UpdatedAt.Equal(now.UTC()) {
+		t.Errorf("hook object.UpdatedAt = %v, want %v", hookObj.UpdatedAt, now.UTC())
+	}
+}
+
+func TestValidateObject_HookErrorSwallowed(t *testing.T) {
+	objectID := uuid.MustParse("00000000-0000-0000-0000-000000000402")
+	uow := newFakeValidationUOW(domain.KnowledgeObject{
+		ID: objectID, WorkspaceID: "ws-1", Status: domain.KnowledgeObjectStatusProposed,
+	})
+	svc := NewValidateObjectServiceWithDependencies(uow, uuid.New, time.Now)
+	svc.SetPostValidationHook(func(_ context.Context, _ domain.KnowledgeObject) error {
+		return errors.New("hook failure")
+	})
+
+	_, err := svc.Validate(context.Background(), ValidateObjectRequest{
+		WorkspaceID:  "ws-1",
+		ObjectID:     objectID,
+		TargetStatus: domain.KnowledgeObjectStatusValidated,
+	})
+	if err != nil {
+		t.Errorf("Validate() returned error = %v, want nil (hook error swallowed)", err)
+	}
+}
+
+func TestValidateObject_NilHookNoPanic(t *testing.T) {
+	objectID := uuid.MustParse("00000000-0000-0000-0000-000000000403")
+	uow := newFakeValidationUOW(domain.KnowledgeObject{
+		ID: objectID, WorkspaceID: "ws-1", Status: domain.KnowledgeObjectStatusProposed,
+	})
+	svc := NewValidateObjectServiceWithDependencies(uow, uuid.New, time.Now)
+	// No hook set — must not panic.
+	_, err := svc.Validate(context.Background(), ValidateObjectRequest{
+		WorkspaceID:  "ws-1",
+		ObjectID:     objectID,
+		TargetStatus: domain.KnowledgeObjectStatusValidated,
+	})
+	if err != nil {
+		t.Errorf("Validate() returned error = %v, want nil", err)
+	}
+}
+
+func TestValidateObject_DeprecatedTargetFiresPostDeprecationHook(t *testing.T) {
+	objectID := uuid.MustParse("00000000-0000-0000-0000-000000000404")
+	uow := newFakeValidationUOW(domain.KnowledgeObject{
+		ID: objectID, WorkspaceID: "ws-1", Status: domain.KnowledgeObjectStatusProposed,
+	})
+	svc := NewValidateObjectServiceWithDependencies(uow, uuid.New, time.Now)
+
+	var depHookCalled bool
+	var valHookCalled bool
+	svc.SetPostDeprecationHook(func(_ context.Context, _ domain.KnowledgeObject) error {
+		depHookCalled = true
+		return nil
+	})
+	svc.SetPostValidationHook(func(_ context.Context, _ domain.KnowledgeObject) error {
+		valHookCalled = true
+		return nil
+	})
+
+	_, err := svc.Validate(context.Background(), ValidateObjectRequest{
+		WorkspaceID:  "ws-1",
+		ObjectID:     objectID,
+		TargetStatus: domain.KnowledgeObjectStatusDeprecated,
+	})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if !depHookCalled {
+		t.Error("post-deprecation hook was not called")
+	}
+	if valHookCalled {
+		t.Error("post-validation hook must not fire for deprecated target")
+	}
+}
+
+func TestValidateObject_ValidatedTargetFiresPostValidationHook(t *testing.T) {
+	objectID := uuid.MustParse("00000000-0000-0000-0000-000000000405")
+	uow := newFakeValidationUOW(domain.KnowledgeObject{
+		ID: objectID, WorkspaceID: "ws-1", Status: domain.KnowledgeObjectStatusProposed,
+	})
+	svc := NewValidateObjectServiceWithDependencies(uow, uuid.New, time.Now)
+
+	var valHookCalled bool
+	var depHookCalled bool
+	svc.SetPostValidationHook(func(_ context.Context, _ domain.KnowledgeObject) error {
+		valHookCalled = true
+		return nil
+	})
+	svc.SetPostDeprecationHook(func(_ context.Context, _ domain.KnowledgeObject) error {
+		depHookCalled = true
+		return nil
+	})
+
+	_, err := svc.Validate(context.Background(), ValidateObjectRequest{
+		WorkspaceID:  "ws-1",
+		ObjectID:     objectID,
+		TargetStatus: domain.KnowledgeObjectStatusValidated,
+	})
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if !valHookCalled {
+		t.Error("post-validation hook was not called")
+	}
+	if depHookCalled {
+		t.Error("post-deprecation hook must not fire for validated target")
+	}
+}

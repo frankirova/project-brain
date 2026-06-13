@@ -349,6 +349,29 @@ type BacklogPage struct {
 	NextCursor string
 }
 
+// PostValidationHook is a best-effort callback invoked after a knowledge object
+// transitions to validated, outside the validation transaction. Errors are
+// logged and swallowed; they never propagate to the caller or roll back the
+// status change.
+type PostValidationHook func(ctx context.Context, obj domain.KnowledgeObject) error
+
+// PostDeprecationHook is a best-effort callback invoked after a knowledge
+// object transitions to deprecated, outside the validation transaction. It
+// has the same best-effort contract as PostValidationHook.
+type PostDeprecationHook func(ctx context.Context, obj domain.KnowledgeObject) error
+
+// SddDocumentRepository is the durability boundary for the sdd_documents
+// table. There is exactly one row per workspace. Implementations MUST:
+//
+//   - Upsert inserts a new row or replaces the existing row for the document's
+//     WorkspaceID. The sections map MUST be serialized as a JSONB object;
+//     a nil/empty map MUST marshal to '{}' (never SQL NULL).
+//   - FindByWorkspace returns ErrNotFound when no row exists for workspaceID.
+type SddDocumentRepository interface {
+	Upsert(ctx context.Context, doc domain.SddDocument) error
+	FindByWorkspace(ctx context.Context, workspaceID string) (domain.SddDocument, error)
+}
+
 // BacklogQuery is the read-side port for the human backlog. The
 // implementation is the postgres layer (newBacklogQuery), but a
 // fake is used in unit tests so the service can be exercised
