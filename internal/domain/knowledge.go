@@ -254,6 +254,7 @@ type IngestTextRequest struct {
 	Content     string      `json:"content"`
 	Source      SourceInput `json:"source"`
 	Object      ObjectInput `json:"object"`
+	RequestID   *uuid.UUID
 }
 
 type IngestTextResult struct {

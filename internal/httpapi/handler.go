@@ -10,6 +10,7 @@ import (
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
+	"github.com/google/uuid"
 )
 
 const maxBodyBytes = 1 << 20 // 1 MiB
@@ -74,11 +75,13 @@ func (h *IngestTextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	reqID := requestID(r)
 	domainReq := domain.IngestTextRequest{
 		WorkspaceID: req.WorkspaceID,
 		Content:     req.Content,
 		Source:      req.Source,
 		Object:      req.Object,
+		RequestID:   &reqID,
 	}
 
 	result, err := h.service.Ingest(r.Context(), domainReq)
@@ -127,6 +130,17 @@ func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.String("handler", "health"),
 			slog.String("error", err.Error()))
 	}
+}
+
+// requestID returns the value of the X-Request-ID header parsed as a UUID,
+// or generates a fresh one when the header is absent or unparseable.
+func requestID(r *http.Request) uuid.UUID {
+	if v := r.Header.Get("X-Request-ID"); v != "" {
+		if id, err := uuid.Parse(v); err == nil {
+			return id
+		}
+	}
+	return uuid.New()
 }
 
 // writeError is a helper to write error responses.
