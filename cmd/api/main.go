@@ -79,6 +79,10 @@ func main() {
 	// read path. Wired only when a Postgres backend is available so
 	// the in-memory UoW fallback does not silently serve empty pages.
 	var backlogHandler http.Handler
+	// sddDocumentHandler serves GET /v1/sdd-document. Wired only when a
+	// Postgres backend is available; the in-memory UoW does not implement
+	// SddDocumentRepository.
+	var sddDocumentHandler http.Handler
 	// collisionDetector is hoisted so the Telegram handler (built later)
 	// can reuse it for the human-in-the-loop validation flow. Stays nil
 	// when vector search is off.
@@ -108,6 +112,15 @@ func main() {
 		backlogSvc = app.NewObjectDebateService(pgDB, postgres.NewBacklogQuery(pgDB.Pool()))
 		backlogHandler = httpapi.NewBacklogHandler(backlogSvc)
 		validateSvc = app.NewValidateObjectService(pgDB)
+
+		// SDD document write + read path. The repo and service are
+		// constructed once and shared by the HTTP handler and the
+		// post-validation hooks on validateSvc.
+		sddRepo := postgres.NewSddDocumentRepo(pgDB.Pool())
+		sddSvc := app.NewSddDocumentService(sddRepo, time.Now, logger)
+		sddDocumentHandler = httpapi.NewSddDocumentHandler(sddSvc)
+		validateSvc.SetPostValidationHook(sddSvc.AppendValidatedObject)
+		validateSvc.SetPostDeprecationHook(sddSvc.AppendValidatedObject)
 
 		if cfg.GeminiAPIKey != "" {
 			embedder := gemini.NewEmbedder(cfg.GeminiAPIKey)
@@ -177,6 +190,9 @@ func main() {
 	}
 	if backlogHandler != nil {
 		protectedMux.Handle("GET /v1/backlog", backlogHandler)
+	}
+	if sddDocumentHandler != nil {
+		protectedMux.Handle("GET /v1/sdd-document", sddDocumentHandler)
 	}
 
 	limiter := ratelimit.New(cfg.RateLimitRPS, cfg.RateLimitBurst, 10*time.Minute)

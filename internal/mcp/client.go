@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/frankirova/project-brain/internal/app"
 )
 
 // Client is a minimal HTTP client for the project-brain API. Each call
@@ -71,6 +73,42 @@ func (c *Client) Ingest(ctx context.Context, workspaceID, content, objType, titl
 		},
 	}
 	return c.do(ctx, http.MethodPost, "/v1/ingest-text", body)
+}
+
+// GetSddDocument retrieves the workspace SDD document as a Markdown string.
+// It returns app.ErrNotFound when the API responds with 404.
+func (c *Client) GetSddDocument(ctx context.Context, workspaceID string) (string, error) {
+	q := url.Values{}
+	q.Set("workspace_id", workspaceID)
+	path := "/v1/sdd-document?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("call GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", app.ErrNotFound
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("API GET %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+
+	return string(data), nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (json.RawMessage, error) {

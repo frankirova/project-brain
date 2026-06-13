@@ -132,21 +132,13 @@ func TestAppendValidatedObject_TypeChangeMovesAcrossSections(t *testing.T) {
 	}
 }
 
-func TestGetDocument_ErrNotFoundReturnsInitializedEmptyDoc(t *testing.T) {
+func TestGetDocument_ErrNotFoundPropagates(t *testing.T) {
 	repo := newFakeSddRepo() // empty — no rows
 	svc := NewSddDocumentService(repo, fixedNow, nil)
 
-	doc, err := svc.GetDocument(context.Background(), "ws-empty")
-	if err != nil {
-		t.Fatalf("GetDocument returned error: %v", err)
-	}
-	if doc.WorkspaceID != "ws-empty" {
-		t.Errorf("WorkspaceID = %q, want ws-empty", doc.WorkspaceID)
-	}
-	for _, k := range domain.SddOrderedSections {
-		if doc.Sections[k] == nil {
-			t.Errorf("section %q is nil, want empty slice", k)
-		}
+	_, err := svc.GetDocument(context.Background(), "ws-empty")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetDocument error = %v, want ErrNotFound", err)
 	}
 }
 

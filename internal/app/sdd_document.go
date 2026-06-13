@@ -96,16 +96,11 @@ func (s *SddDocumentService) AppendValidatedObject(ctx context.Context, obj doma
 }
 
 // GetDocument returns the SDD document for the given workspace. When no
-// document exists yet (ErrNotFound from the repo), GetDocument returns an
-// empty SddDocument with all four sections initialised to empty slices rather
-// than propagating ErrNotFound. This simplifies the read path: callers always
-// get a valid, renderable document.
+// document exists yet, it propagates ErrNotFound so read surfaces can return
+// their documented 404/not-found behavior.
 func (s *SddDocumentService) GetDocument(ctx context.Context, workspaceID string) (domain.SddDocument, error) {
 	doc, err := s.repo.FindByWorkspace(ctx, workspaceID)
 	if err != nil {
-		if err == ErrNotFound {
-			return emptyDocument(workspaceID), nil
-		}
 		return domain.SddDocument{}, err
 	}
 	return doc, nil

@@ -12,6 +12,9 @@ type knowledgeAPI interface {
 	Search(ctx context.Context, workspaceID, query string, limit int) (json.RawMessage, error)
 	CheckCollision(ctx context.Context, workspaceID, content string) (json.RawMessage, error)
 	Ingest(ctx context.Context, workspaceID, content, objType, title string) (json.RawMessage, error)
+	// GetSddDocument returns the workspace SDD document as a rendered Markdown
+	// string. Returns app.ErrNotFound when no document exists for workspaceID.
+	GetSddDocument(ctx context.Context, workspaceID string) (string, error)
 }
 
 // RegisterDefaultTools wires the three knowledge tools onto s, backed by
@@ -96,6 +99,29 @@ func RegisterDefaultTools(s *Server, api knowledgeAPI, defaultWorkspace string) 
 				return "", err
 			}
 			return string(raw), nil
+		},
+	)
+
+	s.AddTool(
+		"get_sdd_document",
+		"Retrieve the living SDD document for a workspace as Markdown. "+
+			"The document captures all validated knowledge objects organised "+
+			"into Context, Decisions, Constraints, and Open Questions sections.",
+		objectSchema(
+			map[string]any{
+				"workspace_id": stringProp("Tenant/workspace scope. Defaults to '" + defaultWorkspace + "'."),
+			},
+			[]string{},
+		),
+		func(ctx context.Context, args map[string]any) (string, error) {
+			workspaceID := stringArg(args, "workspace_id", defaultWorkspace)
+			md, err := api.GetSddDocument(ctx, workspaceID)
+			if err != nil {
+				// Best-effort: return a human-readable message instead of
+				// propagating the error so agents see a meaningful string.
+				return fmt.Sprintf("no SDD document found for workspace %s", workspaceID), nil
+			}
+			return md, nil
 		},
 	)
 }
