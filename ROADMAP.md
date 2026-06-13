@@ -54,7 +54,7 @@ Cambios estimados: `event-driven-pipeline` (NATS), `agent-framework`, `prompt-re
 | ID | Hallazgo | Estado |
 |---|---|---|
 | H1 | FTS per-row language | 🟡 Diferido: tags incluidos, per-row language pospuesto |
-| M6 | `audit_events` wire en código de aplicación | 🟡 Schema listo (migration 0005), wire pendiente |
+| M6 | `audit_events` wire en código de aplicación | ✅ Resuelto: `RequestID` propagado desde `X-Request-ID` header en ingest path |
 | M11 | `ProcessUpdate` callback handler | ✅ Resuelto en Fase 3 (change 15) |
 | M13 | `RelationRepository` mezclado en `ports.go` | ⏳ Bajo valor, skip |
 | L2 | Helpers `nullable*` triviales | ⏳ Bajo valor, skip |

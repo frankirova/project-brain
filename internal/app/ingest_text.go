@@ -110,6 +110,7 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 				Action:      domain.AuditActionKnowledgeDuplicateDetected,
 				TargetType:  domain.AuditTargetKnowledgeObject,
 				TargetID:    existing.ObjectID,
+				RequestID:   req.RequestID,
 				After: domain.Metadata{
 					"identity_key":      prepared.identityKey,
 					"original_audit_id": existing.AuditEventID.String(),
@@ -169,6 +170,7 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 			Action:      domain.AuditActionKnowledgeIngested,
 			TargetType:  domain.AuditTargetKnowledgeObject,
 			TargetID:    objectID,
+			RequestID:   req.RequestID,
 			After: domain.Metadata{
 				"source_id":        sourceID.String(),
 				"content_checksum": prepared.contentChecksum,
