@@ -18,6 +18,7 @@ import (
 	"github.com/frankirova/project-brain/internal/gemini"
 	"github.com/frankirova/project-brain/internal/httpapi"
 	"github.com/frankirova/project-brain/internal/httpapi/auth"
+	"github.com/frankirova/project-brain/internal/httpapi/problem"
 	"github.com/frankirova/project-brain/internal/httpapi/ratelimit"
 	"github.com/frankirova/project-brain/internal/postgres"
 	"github.com/frankirova/project-brain/internal/telegram"
@@ -238,9 +239,17 @@ func main() {
 
 	// Compose: top-level mux routes /v1/health to public, everything else
 	// to the protected chain (auth -> rate limit -> handler).
+	//
+	// The problem middleware wraps the ENTIRE protected chain so
+	// auth challenges (401), rate-limit rejections, and handler
+	// errors are all eligible for RFC 9457 problem+json when the
+	// client opts in via `Accept: application/problem+json`.
+	// Clients that do not opt in continue to receive the legacy
+	// `{"error":"...","code":"..."}` JSON shape — RFC 9457 §4
+	// content negotiation, no feature flag.
 	rootMux := http.NewServeMux()
 	rootMux.Handle("GET /v1/health", publicMux)
-	rootMux.Handle("/", auth.Middleware(cfg.AuthToken)(limiter.Middleware(protectedMux)))
+	rootMux.Handle("/", problem.Middleware(auth.Middleware(cfg.AuthToken)(limiter.Middleware(protectedMux))))
 
 	// Order: auth first, then rate limit, then handler. Rate limit runs
 	// after auth so unauthenticated floods don't consume buckets.
