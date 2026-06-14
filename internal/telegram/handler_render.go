@@ -6,7 +6,21 @@ import (
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
+	"github.com/google/uuid"
 )
+
+// handler_render.go owns the app-side viewmodel assembly: the
+// functions that turn domain types (app.BacklogItem,
+// domain.KnowledgeObject) into the UI-agnostic viewmodel types
+// declared in dto.go (BacklogViewItem, BacklogAction). The handler
+// then hands that viewmodel to handler_render_telegram.go, which
+// is the ONLY file in the package that knows about
+// models.InlineKeyboardMarkup.
+//
+// The split exists per #1737: app stays UI-agnostic, and the
+// Telegram SDK types never cross into internal/app. The viewmodel
+// types themselves were lifted to dto.go in PR2; this file is
+// where the assembly lives.
 
 // TelegramReviewActionNamespace is the callback_data prefix the
 // backlog review flow uses. The full payload Telegram echoes back is
@@ -149,4 +163,61 @@ func renderBacklogCardText(item app.BacklogItem, hydrated *domain.KnowledgeObjec
 // clamps to a non-negative value.
 func formatStaleMarker(days int) string {
 	return fmt.Sprintf("⚠ stale %d days", days)
+}
+
+// BuildBacklogView is the public viewmodel assembly entry point
+// the change-18 spec requires in handler_render.go. It takes a
+// domain BacklogItem (and an optional hydrated KnowledgeObject
+// for the content preview) and projects them into the
+// UI-agnostic BacklogViewItem the render layer consumes.
+//
+// The returned viewmodel carries one BacklogAction per status-
+// aware button, with the visible Label pinned and the Token
+// field left empty. The handler mints one fresh token per
+// action (via Config.NewToken) and fills the Token field in
+// place before handing the slice to the render layer. The split
+// keeps BuildBacklogView pure: it never touches stores, the
+// sender, or a clock.
+//
+// hydrated may be nil; the caller is the only one that knows
+// whether the KnowledgeObjectFinder returned a row.
+func BuildBacklogView(item app.BacklogItem, hydrated *domain.KnowledgeObject) BacklogViewItem {
+	specs := backlogButtonsForStatus(item.Status)
+	actions := make([]BacklogAction, len(specs))
+	for i, s := range specs {
+		actions[i] = BacklogAction{Label: s.Label}
+	}
+	summary := item.Summary
+	if hydrated != nil && hydrated.Content != "" {
+		summary = truncate(hydrated.Content, 400)
+	}
+	return BacklogViewItem{
+		ID:      item.ID,
+		Title:   item.Title,
+		Summary: summary,
+		Status:  item.Status,
+		Actions: actions,
+	}
+}
+
+// BuildResolveView is the viewmodel builder for the post-decision
+// state a single BacklogViewItem lands in once the human has
+// tapped a button. The PR3 callback handler answers Telegram with
+// a text-only edit (no buttons remain), so the viewmodel is a
+// minimal projection: the object id, the new status, and a
+// human-readable verb the render layer can format into the
+// edited message body.
+//
+// The function is exported per the change-18 spec but the
+// handler does not call it yet — the rv: callback path still
+// formats a literal success string at the call site. The builder
+// is staged here next to BuildBacklogView so the viewmodel
+// assembly stays in one place and a future caller can reach
+// for the same import without rediscovering the dto types.
+func BuildResolveView(objectID uuid.UUID, status, verb string) BacklogViewItem {
+	return BacklogViewItem{
+		ID:      objectID,
+		Status:  status,
+		Summary: verb,
+	}
 }

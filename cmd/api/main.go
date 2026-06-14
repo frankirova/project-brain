@@ -336,10 +336,28 @@ func main() {
 		// is available; the handler answers "no disponible" for those
 		// buttons rather than panicking.
 		var tgHandler *telegram.Handler
-		if collisionDetector != nil {
-			tgHandler = telegram.NewHandlerWithBacklogAndReview(svc, collisionDetector, rawInputRepo, nil, logger, tgStore, backlogSvc, ftsRetriever, tgReviewStore, validateSvc, backlogSvc)
-		} else {
-			tgHandler = telegram.NewHandlerWithBacklogAndReview(svc, nil, rawInputRepo, nil, logger, tgStore, backlogSvc, ftsRetriever, tgReviewStore, validateSvc, backlogSvc)
+		tgCfg := telegram.Config{
+			Service:     svc,
+			Detector:    collisionDetector,
+			RawInputs:   rawInputRepo,
+			Bot:         nil, // wired lazily by DefaultHandler on the first update
+			Pending:     tgStore,
+			Backlog:     backlogSvc,
+			Finder:      ftsRetriever,
+			ReviewStore: tgReviewStore,
+			Validator:   validateSvc,
+			Debater:     backlogSvc, // *ObjectDebateService satisfies reviewDebator
+			Logger:      logger,
+		}
+		if collisionDetector == nil {
+			// Typed-nil *app.CollisionDetector would make the
+			// handler's nil check fail; nil the interface instead.
+			tgCfg.Detector = nil
+		}
+		var errTelegram error
+		tgHandler, errTelegram = telegram.New(tgCfg)
+		if errTelegram != nil {
+			logger.Error("telegram handler init", slog.String("error", errTelegram.Error()))
 		}
 		b, err := tgbot.New(cfg.TelegramBotToken,
 			tgbot.WithDefaultHandler(tgHandler.DefaultHandler()),

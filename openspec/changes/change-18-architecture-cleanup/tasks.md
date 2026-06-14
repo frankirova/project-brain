@@ -68,17 +68,17 @@ Chain strategy: feature-branch-chain
 
 ### PR5 (≤ 400)
 
-- [ ] 1.1 Read `handler.go`; list 7 `NewHandler*` overloads + deps
-- [ ] 1.2 Create `config.go` with `Config` struct
-- [ ] 1.3 Add `(*Config).applyDefaults()` + `Validate()` (cross-field)
-- [ ] 1.4 Add `New(Config) (*Handler, error)` → defaults+Validate+seam
-- [ ] 1.5 Make `newHandlerWithStore` the private same-package seam
-- [ ] 1.6 Delete 6 legacy `NewHandler*`; `rg "func NewHandler" internal/telegram` = 0
-- [ ] 1.7 Create `handler_render.go` (`BuildBacklogView`, `BuildResolveView`)
-- [ ] 1.8 Create `handler_render_telegram.go`; move `bot.NewInlineKeyboardButton*`
-- [ ] 1.9 `handler.go` calls viewmodel+render; drop `models.*` imports
-- [ ] 1.10 `handler.go` ≤ 350 lines; `InlineKeyboardMarkup` only in render file
-- [ ] 1.11 `go test -short ./...` green; tests use seam; `go vet ./...` clean
+- [x] 1.1 Read `handler.go`; list 7 `NewHandler*` overloads + deps
+- [x] 1.2 Create `config.go` with `Config` struct
+- [x] 1.3 Add `(*Config).applyDefaults()` + `Validate()` (cross-field)
+- [x] 1.4 Add `New(Config) (*Handler, error)` → defaults+Validate+seam
+- [x] 1.5 Make `newHandlerWithStore` the private same-package seam
+- [x] 1.6 Delete 6 legacy `NewHandler*`; `rg "func NewHandler" internal/telegram` = 0
+- [x] 1.7 Create `handler_render.go` (`BuildBacklogView`, `BuildResolveView`)
+- [x] 1.8 Create `handler_render_telegram.go`; move `bot.NewInlineKeyboardButton*`
+- [x] 1.9 `handler.go` calls viewmodel+render; drop `models.*` imports
+- [x] 1.10 `handler.go` ≤ 350 lines; `InlineKeyboardMarkup` only in render file
+- [x] 1.11 `go test -short ./...` green; tests use seam; `go vet ./...` clean
 **Verify** — `telegram-bot-adapter` §"single constructor with Config" + §"render split"
 
 ### PR6 (≤ 400)

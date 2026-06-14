@@ -87,7 +87,15 @@ func newTestHandlerWithReviewActions(
 ) *Handler {
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	return newHandlerWithBacklog(svc, nil, nil, sender, nil, nil, backlog, finder, review, validator, debater)
+	return newHandlerWithStore(Config{
+		Service:     svc,
+		Sender:      sender,
+		Backlog:     backlog,
+		Finder:      finder,
+		ReviewStore: review,
+		Validator:   validator,
+		Debater:     debater,
+	})
 }
 
 // reviewCallbackUpdate returns a callback update carrying a From

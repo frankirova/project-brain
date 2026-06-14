@@ -168,7 +168,11 @@ func newTestHandlerWithDetector(sender *fakeSender, sourceRepo *fakeSourceRepo, 
 		repos: &testRepos{source: sourceRepo},
 	}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	return newHandlerWithSender(svc, detector, sender, nil)
+	return newHandlerWithStore(Config{
+		Service:  svc,
+		Detector: detector,
+		Sender:   sender,
+	})
 }
 
 type testRepos struct {
@@ -289,7 +293,10 @@ func TestServiceError(t *testing.T) {
 	sender := &fakeSender{}
 	uow := &errorUOW{err: errors.New("database connection lost")}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithSender(svc, nil, sender, nil)
+	handler := newHandlerWithStore(Config{
+		Service: svc,
+		Sender:  sender,
+	})
 
 	err := handler.ProcessUpdate(context.Background(), testUpdate("trigger error"))
 	if err != nil {
@@ -533,7 +540,12 @@ func TestHandlerUsesStoreAbstraction(t *testing.T) {
 	store := newFakePendingStore()
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
+	handler := newHandlerWithStore(Config{
+		Service:  svc,
+		Detector: det,
+		Sender:   sender,
+		Pending:  store,
+	})
 	handler.newToken = func() string { return "tok123" }
 
 	if err := handler.ProcessUpdate(context.Background(), testUpdate("propongo Python")); err != nil {
@@ -570,7 +582,12 @@ func TestHandlerDegradesOnStoreSaveError(t *testing.T) {
 	store.saveErr = errors.New("postgres unreachable")
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
+	handler := newHandlerWithStore(Config{
+		Service:  svc,
+		Detector: det,
+		Sender:   sender,
+		Pending:  store,
+	})
 
 	if err := handler.ProcessUpdate(context.Background(), testUpdate("anything")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -600,7 +617,12 @@ func TestHandlerHandlesStoreTakeError(t *testing.T) {
 	store.takeErr = errors.New("postgres connection lost")
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
+	handler := newHandlerWithStore(Config{
+		Service:  svc,
+		Detector: det,
+		Sender:   sender,
+		Pending:  store,
+	})
 
 	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok123", 100, 555)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -636,7 +658,12 @@ func TestHandlerExpiredEntryReportsUnavailable(t *testing.T) {
 	}
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, nil, sender, store, nil)
+	handler := newHandlerWithStore(Config{
+		Service:  svc,
+		Detector: det,
+		Sender:   sender,
+		Pending:  store,
+	})
 
 	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("keep:tok-stale", 100, 555)); err != nil {
 		t.Fatalf("callback: %v", err)
@@ -651,11 +678,16 @@ func TestHandlerExpiredEntryReportsUnavailable(t *testing.T) {
 
 // newTestHandlerWithRawInputs builds a handler with a fake rawInputRepo
 // and optional collision detector. The pending store defaults to
-// in-memory (nil → installed by newHandlerWithStore).
+// in-memory (nil → installed by Config.applyDefaults).
 func newTestHandlerWithRawInputs(sender *fakeSender, sourceRepo *fakeSourceRepo, detector collisionChecker, rawInputs app.RawInputRepository) *Handler {
 	uow := &fakeIngestionUOW{repos: &testRepos{source: sourceRepo}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	return newHandlerWithStore(svc, detector, rawInputs, sender, nil, nil)
+	return newHandlerWithStore(Config{
+		Service:   svc,
+		Detector:  detector,
+		RawInputs: rawInputs,
+		Sender:    sender,
+	})
 }
 
 // TestHandleMessageCreatesRawInput verifies that handleMessage calls
@@ -744,7 +776,13 @@ func TestCallbackKeepCallsSetPromoted(t *testing.T) {
 	store := newFakePendingStore()
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, rawInputs, sender, store, nil)
+	handler := newHandlerWithStore(Config{
+		Service:   svc,
+		Detector:  det,
+		RawInputs: rawInputs,
+		Sender:    sender,
+		Pending:   store,
+	})
 	handler.newToken = func() string { return "tok-keep" }
 
 	// Trigger the collision prompt (creates raw_input and saves PendingValidation).
@@ -778,7 +816,13 @@ func TestCallbackDiscardCallsSetDiscarded(t *testing.T) {
 	store := newFakePendingStore()
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, rawInputs, sender, store, nil)
+	handler := newHandlerWithStore(Config{
+		Service:   svc,
+		Detector:  det,
+		RawInputs: rawInputs,
+		Sender:    sender,
+		Pending:   store,
+	})
 	handler.newToken = func() string { return "tok-discard" }
 
 	_ = handler.ProcessUpdate(context.Background(), testUpdate("propongo algo"))
@@ -820,7 +864,13 @@ func TestCallbackDiscardZeroRawInputIDSkipsSetDiscarded(t *testing.T) {
 
 	uow := &fakeIngestionUOW{repos: &testRepos{source: &fakeSourceRepo{}}}
 	svc := app.NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
-	handler := newHandlerWithStore(svc, det, rawInputs, sender, store, nil)
+	handler := newHandlerWithStore(Config{
+		Service:   svc,
+		Detector:  det,
+		RawInputs: rawInputs,
+		Sender:    sender,
+		Pending:   store,
+	})
 
 	if err := handler.ProcessUpdate(context.Background(), callbackUpdate("discard:tok-legacy", 100, 555)); err != nil {
 		t.Fatalf("discard step: %v", err)
