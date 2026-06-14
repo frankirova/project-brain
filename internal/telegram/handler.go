@@ -479,7 +479,7 @@ func (h *Handler) issueReviewActions(
 			Action:         spec.Action,
 			ExpectedStatus: item.Status,
 			NextCursor:     nextCursor,
-			ExpiresAt:      time.Now().Add(app.TelegramReviewActionTTL),
+			ExpiresAt:      time.Now().Add(TelegramReviewActionTTL),
 		}); err != nil {
 			return tokens, err
 		}
@@ -743,7 +743,7 @@ func (h *Handler) handleReviewCallback(ctx context.Context, cb *models.CallbackQ
 	}
 
 	// 3. Skip is UI-only: re-render the next backlog card.
-	if action.Action == app.TelegramReviewActionSkip {
+	if action.Action == TelegramReviewActionSkip {
 		return h.renderNextBacklogCard(ctx, cb, chatID, messageID, action)
 	}
 
@@ -781,7 +781,7 @@ func (h *Handler) handleReviewCallback(ctx context.Context, cb *models.CallbackQ
 	actor := strconv.FormatInt(actorID, 10)
 	switch {
 	case action.ExpectedStatus == domain.KnowledgeObjectStatusProposed &&
-		action.Action == app.TelegramReviewActionValidate:
+		action.Action == TelegramReviewActionValidate:
 		if h.validator == nil {
 			return h.sender.AnswerCallback(ctx, cb.ID, "Validación no disponible")
 		}
@@ -799,7 +799,7 @@ func (h *Handler) handleReviewCallback(ctx context.Context, cb *models.CallbackQ
 		return h.sender.AnswerCallback(ctx, cb.ID, "Validado")
 
 	case action.ExpectedStatus == domain.KnowledgeObjectStatusProposed &&
-		action.Action == app.TelegramReviewActionDeprecate:
+		action.Action == TelegramReviewActionDeprecate:
 		if h.validator == nil {
 			return h.sender.AnswerCallback(ctx, cb.ID, "Validación no disponible")
 		}
@@ -817,7 +817,7 @@ func (h *Handler) handleReviewCallback(ctx context.Context, cb *models.CallbackQ
 		return h.sender.AnswerCallback(ctx, cb.ID, "Deprecado")
 
 	case action.ExpectedStatus == domain.KnowledgeObjectStatusProposed &&
-		action.Action == app.TelegramReviewActionDebate:
+		action.Action == TelegramReviewActionDebate:
 		if h.debater == nil {
 			return h.sender.AnswerCallback(ctx, cb.ID, "Debate no disponible")
 		}
@@ -836,7 +836,7 @@ func (h *Handler) handleReviewCallback(ctx context.Context, cb *models.CallbackQ
 		return h.sender.AnswerCallback(ctx, cb.ID, "En debate")
 
 	case action.ExpectedStatus == domain.KnowledgeObjectStatusDebating &&
-		action.Action == app.TelegramReviewActionValidate:
+		action.Action == TelegramReviewActionValidate:
 		if h.debater == nil {
 			return h.sender.AnswerCallback(ctx, cb.ID, "Debate no disponible")
 		}
@@ -854,7 +854,7 @@ func (h *Handler) handleReviewCallback(ctx context.Context, cb *models.CallbackQ
 		return h.sender.AnswerCallback(ctx, cb.ID, "Validado")
 
 	case action.ExpectedStatus == domain.KnowledgeObjectStatusDebating &&
-		action.Action == app.TelegramReviewActionDeprecate:
+		action.Action == TelegramReviewActionDeprecate:
 		if h.debater == nil {
 			return h.sender.AnswerCallback(ctx, cb.ID, "Debate no disponible")
 		}

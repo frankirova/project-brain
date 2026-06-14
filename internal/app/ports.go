@@ -123,19 +123,17 @@ type RelationRepository interface {
 // by setting PendingValidation.ExpiresAt explicitly.
 const PendingValidationTTL = 24 * time.Hour
 
-// TelegramReviewActionTTL bounds how long a rendered Telegram review
-// action button may remain actionable. It intentionally mirrors the
-// collision-validation TTL: old inline keyboards should fail closed and
-// ask the user to refresh instead of mutating lifecycle state long after
-// the backlog card was rendered.
-const TelegramReviewActionTTL = 24 * time.Hour
-
-const (
-	TelegramReviewActionValidate  = "validate"
-	TelegramReviewActionDeprecate = "deprecate"
-	TelegramReviewActionDebate    = "debate"
-	TelegramReviewActionSkip      = "skip"
-)
+// Telegram review action identifiers and the TTL constant for rendered
+// review buttons live in the telegram adapter's dto file (per the
+// telegram-bot-adapter spec "DTOs live in adapter packages" and
+// Engram observation #1737). The TelegramReviewAction struct itself
+// stays in this file because it is part of the TelegramReviewActionStore
+// interface signature and moving it would create a forbidden
+// app -> telegram import. The same reasoning applies to PendingValidation
+// (referenced by PendingValidationStore), EmbeddingJob
+// (referenced by EmbeddingJobRepository), and the BacklogFilter /
+// BacklogItem / BacklogPage bundle (referenced by BacklogQuery): all
+// are port contract types owned by the interface that uses them.
 
 // TelegramReviewAction is the server-side context behind an opaque
 // Telegram callback payload (`rv:<token>`). The callback payload carries
