@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
@@ -133,7 +132,3 @@ WHERE workspace_id = $1 AND id = $2`
 	}
 	return &obj, nil
 }
-
-// nowFunc is a clock seam for tests that want deterministic timestamps
-// in SearchResult.
-var nowFunc = time.Now

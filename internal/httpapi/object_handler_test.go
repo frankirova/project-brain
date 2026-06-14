@@ -22,17 +22,6 @@ func (f *fakeHydrator) FindByID(_ context.Context, _ string, _ uuid.UUID) (*doma
 	return f.obj, f.err
 }
 
-// newObjectRequest builds a request routed through a ServeMux so
-// the {id} path value is set by the mux, not the test. Calling
-// ServeHTTP directly on the handler skips the mux and r.PathValue
-// returns empty.
-func newObjectRequest(t *testing.T, h *ObjectHandler, path string) *http.Request {
-	t.Helper()
-	mux := http.NewServeMux()
-	mux.Handle("GET /v1/objects/{id}", h)
-	return httptest.NewRequest("GET", path, nil)
-}
-
 func dispatch(t *testing.T, h *ObjectHandler, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	mux := http.NewServeMux()

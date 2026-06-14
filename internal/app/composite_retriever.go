@@ -200,11 +200,6 @@ func objectFromID(idStr string) domain.KnowledgeObject {
 // slow retriever does not block the others. (Context cancellation
 // from the caller is still honored.)
 func fanOut(ctx context.Context, r Retriever, q SearchQuery) ([]ScoredSearchHit, error) {
-	type hit struct {
-		ObjectID  string
-		Score     float64
-		MatchType string
-	}
 	type out struct {
 		hits []ScoredSearchHit
 		err  error
