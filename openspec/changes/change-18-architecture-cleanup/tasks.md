@@ -54,15 +54,16 @@ Chain strategy: feature-branch-chain
 
 ### PR4 (≤ 400)
 
-- [ ] 1.1 Read `object_debate.go`; identify 4 use cases
-- [ ] 1.2 Create `object_debate_backlog.go`
-- [ ] 1.3 Create `object_debate_validate.go`
-- [ ] 1.4 Create `object_debate_discard.go`
-- [ ] 1.5 Create `object_debate_decide.go`
-- [ ] 1.6 Create `object_debate_helpers.go` (target guard, metadata)
-- [ ] 1.7 Delete `object_debate.go`
-- [ ] 1.8 `go build ./...` + `go vet ./...` clean
-- [ ] 1.9 `go test -short ./...` green; change-16/17 integration unchanged
+- [x] 1.1 Read `object_debate.go`; identify use cases
+      _(deviation: 3 use cases, not 4 — see `apply-progress-pr4.md` — the validate/discard distinction is encoded in `ResolveDebate`'s `TargetStatus` guard, not as separate use cases)_
+- [x] 1.2 Create `object_debate_backlog.go` (`ListHumanBacklog`)
+- [x] 1.3 Create `object_debate_resolve.go` (`ResolveDebate` + req/result; the validate/discard terminal action)
+- [x] 1.4 _(consolidated into 1.3 per deviation: validate and discard are not separate use cases)_
+- [x] 1.5 Create `object_debate_decide.go` (`MarkDebating` + req/result; the decide-to-debate action)
+- [x] 1.6 Create `object_debate_helpers.go` (service struct + constructors + 5 helpers: `isAllowedDebateTarget`, `isAllowedResolveTarget`, `isValidDebateTrigger`, `isKnownDebateSuggestion`, `buildDebateAuditMetadata`)
+- [x] 1.7 Delete `object_debate.go`
+- [x] 1.8 `go build ./...` + `go vet ./...` clean
+- [x] 1.9 `go test -short ./...` green; change-16/17 integration unchanged
 **Verify** — no spec; postgres integration suite green is the merge gate
 
 ### PR5 (≤ 400)
