@@ -1,0 +1,218 @@
+# =============================================================================
+# golangci-lint configuration — project-brain
+# =============================================================================
+#
+# This file is the v2 baseline for the change-18 architecture-cleanup chain.
+# It is intentionally the FIRST artifact in that chain so that every later PR
+# runs against a known, locked linter set.
+#
+# Why a baseline at all?
+# ----------------------
+# The project is ~21k LOC of Go 1.25 with substantial pre-existing debt (a
+# ~1k-line handler, a 19kB `repositories.go`, etc.). Turning on the full
+# default linter set against that tree would surface hundreds of issues in
+# files we are ABOUT to refactor in PR2–PR6 of the chain. Blocking the
+# refactor on those issues would defeat the point of the chain.
+#
+# So the strategy is: lock the linter set NOW, silence the 6 known-debt paths,
+# and pay down the debt in lockstep with the refactor. The linter stays on
+# as a tripwire for any new file or new violation.
+#
+# 3-phase rollout (gated by PR order in tasks.md / design.md):
+#   P1 (with PR1) — silence the 6 baseline paths listed under
+#                   `linters.exclusions.paths` below.
+#   P2 (after PR2 + PR3) — drop `internal/app/` and `cmd/` from the baseline;
+#                         all violations in those trees must be fixed first.
+#   P3 (after PR4 + PR5 + PR6) — drop the remaining 4 paths
+#                                (`internal/telegram/`, `internal/postgres/
+#                                repositories.go`, `internal/postgres/
+#                                migrations.go`, `internal/runtime/`).
+#   Final — baseline list is empty; `golangci-lint run` reports zero issues
+#           on the full tree.
+#
+# Each phase is a follow-up PR off main, recorded in `ROADMAP.md` per the
+# `repo-quality` spec scenario "Phase 1 removes two paths" and "Final phase
+# empties the baseline".
+#
+# Threshold sources:
+#   - `funlen` (60/40), `gocognit` (30), `cyclop` (10), `lll` (120),
+#     `nestif` (5) come from observation #1741 / #1742 (research checkpoint
+#     for change-18), cross-checked against the live golangci-lint v2.x docs.
+# =============================================================================
+
+version: "2"
+
+# -----------------------------------------------------------------------------
+# `run` — invocation defaults
+# -----------------------------------------------------------------------------
+# v2 dropped `run.skip-dirs` / `run.skip-files` — both are now expressed as
+# `linters.exclusions.paths` (the same 6-path baseline list below doubles
+# as the "skip these entirely" list). CI passes --timeout=5m as a safety net.
+run:
+  timeout: 5m
+  # Run the linter against _test.go files. The baseline exclusion list
+  # under `linters.exclusions.paths` covers the few _test.go files that
+  # belong to the silenced packages; everything else is fair game.
+  tests: true
+
+# -----------------------------------------------------------------------------
+# `linters` — what runs against the source
+# -----------------------------------------------------------------------------
+# We use `default: none` + an explicit `enable:` list so the config is
+# reviewable: you can see the linter set in one place, and a future
+# golangci-lint release that adds new default linters will NOT silently
+# change our set.
+#
+# The set is the union of the "always-on" v2 defaults (govet, errcheck,
+# staticcheck, unused, ineffassign) and the complexity / style linters
+# that the change-18 research (#1741 / #1742) recommends. `gofmt` is
+# intentionally NOT here in v2 — it is a formatter, not a linter. Note
+# that `gosimple` is no longer a separate linter in v2 — its rules were
+# folded into `staticcheck` (confirmed against the v2 linter registry),
+# so it does not appear in the explicit enable list.
+linters:
+  default: none
+  enable:
+    # --- correctness / safety (the v2 "always-on" tier) ---
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+
+    # --- complexity / readability (research #1741 / #1742) ---
+    - funlen     # function length; see settings below
+    - gocognit   # cognitive complexity
+    - cyclop     # cyclomatic complexity
+    - lll        # long lines
+    - nestif     # nested ifs
+
+  # Per-linter settings. We set thresholds EXPLICITLY so that a future
+  # golangci-lint release that changes a default does not silently shift
+  # the bar on us.
+  settings:
+    funlen:
+      lines: 60
+      statements: 40
+      # Ignore test files for length: integration tests with table-driven
+      # subtests routinely exceed 60 lines but are still readable.
+      ignore-comments: true
+    gocognit:
+      min-complexity: 30
+    cyclop:
+      max-complexity: 10
+      # We tolerate higher package-average complexity because the postgres
+      # adapter is one big package by design (transaction boundary lives
+      # in db.go and is reachable from every repo file).
+      package-average: 0.0
+    lll:
+      line-length: 120
+      tab-width: 4
+    nestif:
+      min-complexity: 5
+    govet:
+      # Enable the standard analyzers; disable shadow because the project
+      # relies on the `if err := ...; err != nil` idiom in places where a
+      # `:=` rebind is intentional.
+      enable-all: true
+      disable:
+        - shadow
+
+  # -----------------------------------------------------------------------------
+  # Baseline path-based exclusions — the 3-phase rollout.
+  # -----------------------------------------------------------------------------
+  # These 6 paths are silenced entirely from the linter output. The list is
+  # the contract spelled out in `repo-quality` §"baseline ignores for
+  # existing debt" and must shrink in lockstep with the change-18 PR chain.
+  #
+  # Per-path notes (as-of PR1):
+  #   - `internal/app/`                     — refactored in PR2 + PR4; P2 drop
+  #   - `internal/telegram/`                — refactored in PR5; P3 drop
+  #   - `internal/postgres/repositories.go` — split in PR3; P3 drop
+  #   - `internal/postgres/migrations.go`   — does NOT exist yet at PR1; this
+  #       entry is a forward declaration for when migrations move into Go
+  #       (currently SQL is in `/migrations/*.sql`). P3 drop.
+  #   - `internal/runtime/`                 — does NOT exist yet at PR1;
+  #       created in PR6. P3 drop.
+  #   - `cmd/`                              — slimmed in PR6; P2 drop.
+  #
+  # -----------------------------------------------------------------------------
+  # Test-file exemptions (universal Go convention, NOT a debt workaround).
+  # -----------------------------------------------------------------------------
+  # `_test.go` files are excluded from the length / complexity linters
+  # (`lll`, `funlen`, `cyclop`, `gocognit`, `nestif`) because:
+  #   - `lll`: table-driven tests routinely carry long literal values
+  #     (UUIDs, SQL snippets, multi-field struct literals) that are
+  #     syntactically unbreakable without harming readability.
+  #   - `funlen` / `cyclop` / `gocognit` / `nestif`: integration tests
+  #     commonly walk a happy-path with 5-10 sub-asserts; the cognitive
+  #     load is low even when the cyclomatic count is high.
+  # This pattern is industry standard (kubernetes, prometheus, hashicorp/*
+  # all do the same). It is NOT project-specific debt silencing; it is a
+  # permanent linter config. The correctness linters (govet, errcheck,
+  # staticcheck, unused, ineffassign) still run on _test.go files.
+  exclusions:
+    paths:
+      - internal/app/
+      - internal/telegram/
+      - internal/postgres/repositories.go
+      - internal/postgres/migrations.go
+      - internal/runtime/
+      - cmd/
+    rules:
+      - path: '(.+)_test\.go$'
+        linters:
+          - lll
+          - funlen
+          - cyclop
+          - gocognit
+          - nestif
+
+# -----------------------------------------------------------------------------
+# `formatters` — what runs against the source tree for layout (v2 split this
+# off from `linters` so the "fix it" vs "report it" distinction is explicit).
+# -----------------------------------------------------------------------------
+# We enable `gofmt` and `goimports`; `gofumpt` is a strict superset of gofmt
+# and can be added later if the team wants it. Both formatters honor the
+# same baseline exclusion list as the linters.
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - internal/app/
+      - internal/telegram/
+      - internal/postgres/repositories.go
+      - internal/postgres/migrations.go
+      - internal/runtime/
+      - cmd/
+    # Formatters DO run on _test.go files; gofmt/goimports behavior does
+    # not depend on file kind and we want imports ordered in tests too.
+
+# -----------------------------------------------------------------------------
+# `issues` — issue-counting knobs.
+# -----------------------------------------------------------------------------
+# v2 still exposes a small `issues:` block for the LINT-OUTPUT aggregator
+# (NOT the per-linter rules — those moved to `linters.exclusions.*`).
+# Setting both limits to 0 means: do not stop reporting after N issues in the
+# same linter, and do not dedupe identical issues. We want the FULL report
+# every time so the tripwire works.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+# -----------------------------------------------------------------------------
+# `output` — how findings are presented.
+# -----------------------------------------------------------------------------
+# `text` is the v2 replacement for the v1 `colored-line-number` /
+# `line-number` formats. The per-format options (print-linter-name,
+# print-issued-lines, colors) live INSIDE the format block in v2.
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
+      colors: true

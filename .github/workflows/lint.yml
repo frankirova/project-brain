@@ -1,0 +1,63 @@
+name: lint
+
+# =============================================================================
+# golangci-lint v2 CI — change-18 PR1 baseline.
+#
+# This workflow is the LINT job. The MINIMUM workflow that runs gofmt + vet +
+# short tests lives in `.github/workflows/ci.yml` (added by change-16 PR5,
+# commit 81234ea) and is unchanged by this PR. PR1 adds this SEPARATE
+# workflow so the v2 baseline can be rolled out without touching the
+# existing CI surface.
+#
+# Triggers:
+#   - push to any feat/change-18-pr1-* branch (this PR's own branch, so
+#     every push on the PR is re-linted)
+#   - pull_request targeting the change-18 tracker branch OR main, so
+#     review-iteration on the PR and any follow-up PRs in the chain both
+#     get covered.
+#
+# Action SHAs are pinned to immutable commit SHAs per the change-16 PR5
+# minimum-workflow pattern. Bump both the version: tag and the SHA together
+# when upgrading.
+# =============================================================================
+
+on:
+  push:
+    branches:
+      - 'feat/change-18-pr1-*'
+  pull_request:
+    branches:
+      - feature/change-18-architecture-cleanup
+      - main
+
+# Least-privilege: the lint job only reads the repo. No write or package
+# permissions.
+permissions:
+  contents: read
+
+jobs:
+  golangci:
+    name: golangci-lint v${{ inputs.lint-version }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.25.x'
+          # Disable the actions/setup-go cache: golangci-lint-action manages
+          # its own cache key based on `.golangci.yml` and the linter version,
+          # and a double cache layer just thrashes disk on the runner.
+          cache: false
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@23faadfdeb23a6f9e511beaba149bb123b5b145a # v6.0.0
+        with:
+          # Pinned to the v2.12.x line per change-18 PR1; bump both this
+          # version string and the SHA above when upgrading.
+          version: v2.12.2
+          # Explicit config path so a future repo-wide rename of
+          # `.golangci.yml` does not silently fall through to the default.
+          args: --config .golangci.yml
