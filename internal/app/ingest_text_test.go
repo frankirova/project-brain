@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -262,6 +263,65 @@ func TestIngestPersistsNewMetadataFields(t *testing.T) {
 	}
 	if object.Importance == nil || *object.Importance != importance {
 		t.Fatalf("object.Importance = %v, want %v", object.Importance, importance)
+	}
+}
+
+func TestIngestRejectsConfidenceOutsideRange(t *testing.T) {
+	cases := []struct {
+		name       string
+		confidence float64
+	}{
+		{name: "below zero", confidence: -0.1},
+		{name: "above one", confidence: 1.5},
+		{name: "deeply negative", confidence: -42},
+		{name: "deeply over", confidence: 100},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			uow := newFakeUOW()
+			service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+
+			c := tc.confidence
+			_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+				WorkspaceID: "workspace-1",
+				Content:     "knowledge with bad confidence",
+				Object:      domain.ObjectInput{Type: "decision", Confidence: &c},
+			})
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("Ingest() error = %v, want validation error", err)
+			}
+			if uow.started || uow.repos.writeCount() != 0 {
+				t.Fatalf("started=%v writes=%d, want no transaction or writes", uow.started, uow.repos.writeCount())
+			}
+
+			// Verify the error points at the confidence field. The
+			// existing FieldErrorf helper produces a structured
+			// "field: reason" message; checking the prefix is the
+			// stable contract for now.
+			if !strings.HasPrefix(err.Error(), "confidence:") {
+				t.Fatalf("error = %q, want message starting with %q", err.Error(), "confidence:")
+			}
+		})
+	}
+}
+
+func TestIngestAcceptsConfidenceAtBoundaries(t *testing.T) {
+	for _, c := range []float64{0, 1} {
+		uow := newFakeUOW()
+		service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+		cc := c
+		_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+			WorkspaceID: "workspace-1",
+			Content:     "knowledge at boundary",
+			Object:      domain.ObjectInput{Type: "decision", Confidence: &cc},
+		})
+		if err != nil {
+			t.Fatalf("Ingest(confidence=%v) returned error: %v", c, err)
+		}
+		if uow.repos.writeCount() != 4 {
+			t.Fatalf("writes=%d, want 4", uow.repos.writeCount())
+		}
 	}
 }
 
