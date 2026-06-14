@@ -47,6 +47,23 @@ type Config struct {
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
+
+	// SecurityHeadersEnabled gates the OWASP 2025 baseline
+	// headers middleware (nosniff, DENY, no-referrer, locked-down
+	// Permissions-Policy, same-site CORP, Cache-Control:
+	// no-store, max-age=0). Default true. Set to false to
+	// disable the entire middleware for an environment where
+	// the operator needs to ship responses with no security
+	// header baseline at all.
+	SecurityHeadersEnabled bool
+
+	// TLSEnabled gates the Strict-Transport-Security header.
+	// Set to true when the API is being served over HTTPS
+	// (typically behind a TLS-terminating reverse proxy in
+	// production). Default false so a dev / test instance
+	// running on plain HTTP does not tell clients to upgrade
+	// to HTTPS for two years.
+	TLSEnabled bool
 }
 
 // ShutdownTimeout returns the configured shutdown grace period.
@@ -82,21 +99,23 @@ func (c Config) HTTPIdleTimeout() time.Duration {
 // defaults so the scaffold can run without external services.
 func Load() (Config, error) {
 	cfg := Config{
-		Environment:       valueOrDefault("PROJECT_BRAIN_ENV", defaultEnvironment),
-		Port:              valueOrDefault("PROJECT_BRAIN_API_PORT", defaultPort),
-		DatabaseDSN:       os.Getenv("PROJECT_BRAIN_DATABASE_DSN"),
-		TelegramBotToken:  os.Getenv("PROJECT_BRAIN_TELEGRAM_BOT_TOKEN"),
-		AuthToken:         os.Getenv("PROJECT_BRAIN_AUTH_TOKEN"),
-		GeminiAPIKey:      os.Getenv("PROJECT_BRAIN_GEMINI_API_KEY"),
-		ShutdownSecs:      intEnvOrDefault("PROJECT_BRAIN_SHUTDOWN_SECS", defaultShutdownSec),
-		RateLimitRPS:      floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_RPS", 5),
-		RateLimitBurst:    floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_BURST", 10),
-		TrustProxy:        boolEnvOrDefault("PROJECT_BRAIN_TRUST_PROXY", false),
-		IngestMaxBytes:    int64EnvOrDefault("PROJECT_BRAIN_INGEST_MAX_BYTES", 1<<20),
-		ReadHeaderTimeout: durationEnvOrDefault("PROJECT_BRAIN_HTTP_READ_HEADER_TIMEOUT_SECS", defaultHTTPReadHeaderTimeout),
-		ReadTimeout:       durationEnvOrDefault("PROJECT_BRAIN_HTTP_READ_TIMEOUT_SECS", defaultHTTPReadTimeout),
-		WriteTimeout:      durationEnvOrDefault("PROJECT_BRAIN_HTTP_WRITE_TIMEOUT_SECS", defaultHTTPWriteTimeout),
-		IdleTimeout:       durationEnvOrDefault("PROJECT_BRAIN_HTTP_IDLE_TIMEOUT_SECS", defaultHTTPIdleTimeout),
+		Environment:            valueOrDefault("PROJECT_BRAIN_ENV", defaultEnvironment),
+		Port:                   valueOrDefault("PROJECT_BRAIN_API_PORT", defaultPort),
+		DatabaseDSN:            os.Getenv("PROJECT_BRAIN_DATABASE_DSN"),
+		TelegramBotToken:       os.Getenv("PROJECT_BRAIN_TELEGRAM_BOT_TOKEN"),
+		AuthToken:              os.Getenv("PROJECT_BRAIN_AUTH_TOKEN"),
+		GeminiAPIKey:           os.Getenv("PROJECT_BRAIN_GEMINI_API_KEY"),
+		ShutdownSecs:           intEnvOrDefault("PROJECT_BRAIN_SHUTDOWN_SECS", defaultShutdownSec),
+		RateLimitRPS:           floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_RPS", 5),
+		RateLimitBurst:         floatEnvOrDefault("PROJECT_BRAIN_RATE_LIMIT_BURST", 10),
+		TrustProxy:             boolEnvOrDefault("PROJECT_BRAIN_TRUST_PROXY", false),
+		IngestMaxBytes:         int64EnvOrDefault("PROJECT_BRAIN_INGEST_MAX_BYTES", 1<<20),
+		ReadHeaderTimeout:      durationEnvOrDefault("PROJECT_BRAIN_HTTP_READ_HEADER_TIMEOUT_SECS", defaultHTTPReadHeaderTimeout),
+		ReadTimeout:            durationEnvOrDefault("PROJECT_BRAIN_HTTP_READ_TIMEOUT_SECS", defaultHTTPReadTimeout),
+		WriteTimeout:           durationEnvOrDefault("PROJECT_BRAIN_HTTP_WRITE_TIMEOUT_SECS", defaultHTTPWriteTimeout),
+		IdleTimeout:            durationEnvOrDefault("PROJECT_BRAIN_HTTP_IDLE_TIMEOUT_SECS", defaultHTTPIdleTimeout),
+		SecurityHeadersEnabled: boolEnvOrDefault("PROJECT_BRAIN_SECURITY_HEADERS", true),
+		TLSEnabled:             boolEnvOrDefault("PROJECT_BRAIN_TLS", false),
 	}
 
 	if err := validatePort(cfg.Port); err != nil {

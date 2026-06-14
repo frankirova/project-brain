@@ -20,6 +20,7 @@ import (
 	"github.com/frankirova/project-brain/internal/httpapi/auth"
 	"github.com/frankirova/project-brain/internal/httpapi/problem"
 	"github.com/frankirova/project-brain/internal/httpapi/ratelimit"
+	"github.com/frankirova/project-brain/internal/httpapi/security"
 	"github.com/frankirova/project-brain/internal/postgres"
 	"github.com/frankirova/project-brain/internal/telegram"
 	tgbot "github.com/go-telegram/bot"
@@ -240,16 +241,21 @@ func main() {
 	// Compose: top-level mux routes /v1/health to public, everything else
 	// to the protected chain (auth -> rate limit -> handler).
 	//
-	// The problem middleware wraps the ENTIRE protected chain so
-	// auth challenges (401), rate-limit rejections, and handler
-	// errors are all eligible for RFC 9457 problem+json when the
-	// client opts in via `Accept: application/problem+json`.
-	// Clients that do not opt in continue to receive the legacy
-	// `{"error":"...","code":"..."}` JSON shape — RFC 9457 §4
-	// content negotiation, no feature flag.
+	// The security middleware sits on the OUTSIDE of the entire
+	// stack (problem + auth + rate limit + handlers) so every
+	// response carries the OWASP 2025 baseline headers, including
+	// 401 auth challenges and 500 panic recoveries. HSTS is
+	// emitted only when both SecurityHeadersEnabled and TLSEnabled
+	// are true. The problem middleware (RFC 9457) is wired
+	// inside the security middleware so that error responses
+	// rewritten as problem+json still carry the baseline headers.
+	var rootHandler http.Handler = problem.Middleware(auth.Middleware(cfg.AuthToken)(limiter.Middleware(protectedMux)))
+	if cfg.SecurityHeadersEnabled {
+		rootHandler = security.Middleware(cfg.TLSEnabled)(rootHandler)
+	}
 	rootMux := http.NewServeMux()
 	rootMux.Handle("GET /v1/health", publicMux)
-	rootMux.Handle("/", problem.Middleware(auth.Middleware(cfg.AuthToken)(limiter.Middleware(protectedMux))))
+	rootMux.Handle("/", rootHandler)
 
 	// Order: auth first, then rate limit, then handler. Rate limit runs
 	// after auth so unauthenticated floods don't consume buckets.
