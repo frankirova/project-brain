@@ -11,7 +11,7 @@ Estado vivo del proyecto. Fases completadas colapsadas; solo queda lo pendiente.
 [✅] Fase 2: Hybrid RAG         — embeddings, vector search, composite retrieval, collision detection
 [✅] Fase 3: Human-in-the-Loop  — raw inputs, lifecycle, backlog, debate, Telegram UI, consolidated SDD
 [ ]  Fase 4: Multi-agent Platform
-[ ]  Hardening: production-readiness (ver abajo)
+[✅] Hardening: production-readiness (ver abajo)
 ```
 
 **Sistema actual**: ingest vía HTTP + Telegram → collision detection → human backlog → validar/debatir/descartar vía inline keyboards → lifecycle auditado en Postgres.
@@ -76,10 +76,10 @@ Cambios estimados: `event-driven-pipeline` (NATS), `agent-framework`, `prompt-re
 | M13 | `RelationRepository` mezclado en `ports.go` | ⏳ Bajo valor, skip |
 | L2 | Helpers `nullable*` triviales | ⏳ Bajo valor, skip |
 | L5 | Checksum format inconsistente | ⏳ Documentar (no normalizar) |
-| H2 | Auth fail-open si falta token | 🟠 En hardening batch |
-| H3 | HTTP server sin timeouts | 🟠 En hardening batch |
-| H4 | SDD document update concurrente | 🟠 En hardening batch |
-| H5 | Health sin readiness | 🟠 En hardening batch |
+| H2 | Auth fail-open si falta token | ✅ Resuelto (change 16, PR1: `enforceProductionAuth` fail-closed en `cmd/api/auth_invariance.go`) |
+| H3 | HTTP server sin timeouts | ✅ Resuelto (change 16, PR2: timeouts configurables en `cmd/api/main.go`) |
+| H4 | SDD document update concurrente | ✅ Resuelto (change 16, PR3: row lock + `WithinSddDocumentTx`) |
+| H5 | Health sin readiness | ✅ Resuelto (change 16, PR4: `/v1/liveness` + `/v1/readiness` con DB ping) |
 
 ---
 
