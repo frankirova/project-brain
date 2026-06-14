@@ -93,6 +93,13 @@ type KnowledgeObject struct {
 	Confidence *float64
 	// Importance is a 0..100 score enforced by a CHECK constraint in the DB.
 	Importance *int
+	// Language is the text-search configuration used by the
+	// per-row tsvector generated column. NULL means "use the
+	// default ('simple')". The app-level allowlist rejects
+	// unsupported values with ErrUnsupportedLanguage; the DB
+	// CHECK constraint is the safety net for direct SQL writes.
+	// Valid values: '', 'simple', 'english', 'spanish'.
+	Language string
 }
 
 type ObjectSource struct {
@@ -262,6 +269,10 @@ type ObjectInput struct {
 	Tags       []string   `json:"tags,omitempty"`
 	Confidence *float64   `json:"confidence,omitempty"`
 	Importance *int       `json:"importance,omitempty"`
+	// Language is the per-row text-search configuration for the
+	// FTS generated column. Empty (or missing) means "use the
+	// default". Valid values: 'simple', 'english', 'spanish'.
+	Language string `json:"language,omitempty"`
 }
 
 type IngestTextRequest struct {

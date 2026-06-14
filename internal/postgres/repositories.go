@@ -165,8 +165,8 @@ func (r *knowledgeObjectRepository) Create(ctx context.Context, object domain.Kn
 		tags = []string{}
 	}
 	_, err = r.tx.Exec(ctx, `
-INSERT INTO knowledge_objects (id, workspace_id, type, title, summary, content, status, metadata, created_by, created_at, updated_at, project_id, tags, confidence, importance)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)`,
+INSERT INTO knowledge_objects (id, workspace_id, type, title, summary, content, status, metadata, created_by, created_at, updated_at, project_id, tags, confidence, importance, language)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, NULLIF($16, ''))`,
 		object.ID,
 		object.WorkspaceID,
 		object.Type,
@@ -182,6 +182,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)
 		tags,
 		nullableFloat64(object.Confidence),
 		nullableInt(object.Importance),
+		object.Language,
 	)
 	return err
 }

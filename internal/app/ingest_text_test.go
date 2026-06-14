@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -352,6 +353,71 @@ func TestIngestSkipsHookOnDuplicate(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("hook called %d times on duplicate, want 0", calls)
+	}
+}
+
+func TestIngestRejectsUnsupportedLanguage(t *testing.T) {
+	cases := []string{"klingon", "french", "ENGLISH", "eng", "0xdeadbeef"}
+	for _, lang := range cases {
+		t.Run(lang, func(t *testing.T) {
+			uow := newFakeUOW()
+			service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+			_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+				WorkspaceID: "workspace-1",
+				Content:     "knowledge with bad language",
+				Object:      domain.ObjectInput{Type: "decision", Language: lang},
+			})
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("Ingest() error = %v, want validation error", err)
+			}
+			if uow.started || uow.repos.writeCount() != 0 {
+				t.Fatalf("started=%v writes=%d, want no transaction or writes", uow.started, uow.repos.writeCount())
+			}
+			if !strings.HasPrefix(err.Error(), "language:") {
+				t.Fatalf("error = %q, want message starting with %q", err.Error(), "language:")
+			}
+		})
+	}
+}
+
+func TestIngestAcceptsSupportedLanguages(t *testing.T) {
+	for _, lang := range []string{"", "simple", "english", "spanish"} {
+		t.Run("lang="+lang, func(t *testing.T) {
+			uow := newFakeUOW()
+			service := NewIngestTextServiceWithDependencies(uow, uuid.New, time.Now, nil)
+			_, err := service.Ingest(context.Background(), domain.IngestTextRequest{
+				WorkspaceID: "workspace-1",
+				Content:     "knowledge in " + lang,
+				Object:      domain.ObjectInput{Type: "decision", Language: lang},
+			})
+			if err != nil {
+				t.Fatalf("Ingest(language=%q) returned error: %v", lang, err)
+			}
+			object := uow.repos.object.created[0]
+			if object.Language != lang {
+				t.Fatalf("object.Language = %q, want %q", object.Language, lang)
+			}
+		})
+	}
+}
+
+func TestIsSupportedLanguage(t *testing.T) {
+	cases := []struct {
+		lang string
+		want bool
+	}{
+		{"", true},
+		{"simple", true},
+		{"english", true},
+		{"spanish", true},
+		{"klingon", false},
+		{"french", false},
+		{"ENGLISH", false}, // case-sensitive — matches the DB CHECK exactly
+	}
+	for _, tc := range cases {
+		if got := IsSupportedLanguage(tc.lang); got != tc.want {
+			t.Errorf("IsSupportedLanguage(%q) = %v, want %v", tc.lang, got, tc.want)
+		}
 	}
 }
 

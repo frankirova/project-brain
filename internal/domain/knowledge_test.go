@@ -104,3 +104,39 @@ func TestRelationInputOmitsOptionalFields(t *testing.T) {
 		t.Errorf("Metadata = %v, want nil", input.Metadata)
 	}
 }
+
+func TestObjectInputRoundTripsLanguage(t *testing.T) {
+	cases := []struct {
+		lang  string
+		input string
+	}{
+		{"english", `{"language":"english"}`},
+		{"", `{"language":""}`},
+		// No language field at all — should default to empty.
+		{"", `{}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.lang, func(t *testing.T) {
+			var in ObjectInput
+			if err := json.Unmarshal([]byte(tc.input), &in); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if in.Language != tc.lang {
+				t.Errorf("Language = %q, want %q", in.Language, tc.lang)
+			}
+
+			// Round-trip: marshal and unmarshal again.
+			b, err := json.Marshal(in)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			var out ObjectInput
+			if err := json.Unmarshal(b, &out); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if out.Language != tc.lang {
+				t.Errorf("round-trip Language = %q, want %q", out.Language, tc.lang)
+			}
+		})
+	}
+}

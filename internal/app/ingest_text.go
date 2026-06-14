@@ -45,6 +45,27 @@ func (e *validationError) Error() string {
 
 func (e *validationError) Unwrap() error { return ErrValidation }
 
+// SupportedLanguages is the closed set of language codes the
+// per-row tsvector column accepts. The same set is enforced at
+// the database level by a CHECK constraint (see migration
+// 0016). Both layers must agree.
+var SupportedLanguages = map[string]struct{}{
+	"simple":  {},
+	"english": {},
+	"spanish": {},
+}
+
+// IsSupportedLanguage reports whether lang is a recognized text
+// search configuration. The empty string is always accepted and
+// means "use the default ('simple')" in the generated column.
+func IsSupportedLanguage(lang string) bool {
+	if lang == "" {
+		return true
+	}
+	_, ok := SupportedLanguages[lang]
+	return ok
+}
+
 type IDGenerator func() uuid.UUID
 
 type Clock func() time.Time
@@ -161,6 +182,7 @@ func (s *IngestTextService) Ingest(ctx context.Context, req domain.IngestTextReq
 			Tags:        prepared.tags,
 			Confidence:  prepared.object.Confidence,
 			Importance:  prepared.object.Importance,
+			Language:    prepared.object.Language,
 		}
 		link := domain.ObjectSource{ObjectID: objectID, SourceID: sourceID, Relevance: 1}
 		auditEvent := domain.AuditEvent{
@@ -277,6 +299,14 @@ func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error)
 
 	contentChecksum := checksum(content)
 	identityKey := computeIdentityKey(workspaceID, sourceType, req.Source, contentChecksum)
+
+	// Validate language against the closed set. The empty string
+	// is accepted and maps to NULL on the row (the generated
+	// column falls back to 'simple' for NULL). The DB has a
+	// matching CHECK constraint as defense in depth.
+	if !IsSupportedLanguage(req.Object.Language) {
+		return preparedIngestText{}, FieldErrorf("language", fmt.Sprintf("is not a supported text search configuration: %q (supported: simple, english, spanish)", req.Object.Language))
+	}
 
 	// Default tags to a non-nil empty slice so writes are predictable and
 	// round-trips preserve a non-nil value.
