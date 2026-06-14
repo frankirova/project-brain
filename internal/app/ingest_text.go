@@ -278,6 +278,15 @@ func prepareIngestText(req domain.IngestTextRequest) (preparedIngestText, error)
 	contentChecksum := checksum(content)
 	identityKey := computeIdentityKey(workspaceID, sourceType, req.Source, contentChecksum)
 
+	// Validate confidence ∈ [0, 1] before opening a transaction. The
+	// DB has a matching CHECK constraint (see migrations/0015_*), but
+	// failing fast here lets the handler return a clean 400 with the
+	// offending value in the error message instead of a Postgres
+	// constraint violation surfacing as a 500.
+	if c := req.Object.Confidence; c != nil && (*c < 0 || *c > 1) {
+		return preparedIngestText{}, FieldErrorf("confidence", fmt.Sprintf("must be between 0 and 1, got %v", *c))
+	}
+
 	// Default tags to a non-nil empty slice so writes are predictable and
 	// round-trips preserve a non-nil value.
 	tags := req.Object.Tags
