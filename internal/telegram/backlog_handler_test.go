@@ -301,10 +301,10 @@ func TestBacklogCommandProposedItem(t *testing.T) {
 		gotActions[a.Action] = true
 	}
 	for _, want := range []string{
-		app.TelegramReviewActionValidate,
-		app.TelegramReviewActionDebate,
-		app.TelegramReviewActionDeprecate,
-		app.TelegramReviewActionSkip,
+		TelegramReviewActionValidate,
+		TelegramReviewActionDebate,
+		TelegramReviewActionDeprecate,
+		TelegramReviewActionSkip,
 	} {
 		if !gotActions[want] {
 			t.Errorf("missing action %q in saved review actions: %+v", want, gotActions)
@@ -350,7 +350,7 @@ func TestBacklogCommandDebatingItemStale(t *testing.T) {
 		t.Errorf("expected 3 saved actions, got %d", len(store.data))
 	}
 	for _, a := range store.data {
-		if a.Action == app.TelegramReviewActionDebate {
+		if a.Action == TelegramReviewActionDebate {
 			t.Errorf("debating backlog must not expose the debate action")
 		}
 	}
@@ -388,7 +388,7 @@ func TestBacklogCommandDeprecatedItemSkipOnly(t *testing.T) {
 		t.Fatalf("expected 1 saved action, got %d", len(store.data))
 	}
 	for _, a := range store.data {
-		if a.Action != app.TelegramReviewActionSkip {
+		if a.Action != TelegramReviewActionSkip {
 			t.Errorf("deprecated card action = %q, want skip", a.Action)
 		}
 	}

@@ -29,12 +29,13 @@ Chain strategy: feature-branch-chain
 
 ### PR2 (≤ 200)
 
-- [ ] 1.1 Create `internal/telegram/dto.go` (`BacklogViewItem`, `BacklogAction`)
-- [ ] 1.2 Create `internal/embeddings/dto.go` with embedding DTOs
-- [ ] 1.3 Strip DTOs from `internal/app/ports.go`; interfaces only (≤ 80 LOC)
-- [ ] 1.4 Update `internal/app/` imports to new DTO pkgs
-- [ ] 1.5 `go build ./...` + `go vet ./...` clean
-- [ ] 1.6 `go test -short ./...` green; deps exclude telegram/embeddings
+- [x] 1.1 Create `internal/telegram/dto.go` (`BacklogViewItem`, `BacklogAction`)
+- [x] 1.2 Create `internal/embeddings/dto.go` with embedding DTOs
+- [x] 1.3 Strip DTOs from `internal/app/ports.go`; interfaces only (≤ 80 LOC)
+      _(see deviation note in `openspec/changes/change-18-architecture-cleanup/apply-progress-pr2.md` — port-contract structs stay in app per decision (c) of the orchestrator brief; constants + new viewmodel types moved out)_
+- [x] 1.4 Update `internal/app/` imports to new DTO pkgs
+- [x] 1.5 `go build ./...` + `go vet ./...` clean
+- [x] 1.6 `go test -short ./...` green; deps exclude telegram/embeddings
 **Verify** — `telegram-bot-adapter` §"DTOs live in adapter packages"
 
 ### PR3 (≤ 400)

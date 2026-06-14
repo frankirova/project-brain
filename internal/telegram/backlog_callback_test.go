@@ -113,7 +113,7 @@ func reviewCallbackUpdate(data string, chatID int64, messageID int, fromID int64
 func seedReviewAction(t *testing.T, store reviewActionStore, action app.TelegramReviewAction) string {
 	t.Helper()
 	if action.ExpiresAt.IsZero() {
-		action.ExpiresAt = time.Now().Add(app.TelegramReviewActionTTL)
+		action.ExpiresAt = time.Now().Add(TelegramReviewActionTTL)
 	}
 	if err := store.Save(context.Background(), action); err != nil {
 		t.Fatalf("seed review action: %v", err)
@@ -145,7 +145,7 @@ func TestReviewCallbackHappyPath(t *testing.T) {
 		{
 			name:           "proposed + validate dispatches to Validate(target=validated)",
 			sourceStatus:   domain.KnowledgeObjectStatusProposed,
-			action:         app.TelegramReviewActionValidate,
+			action:         TelegramReviewActionValidate,
 			wantEditedText: "validado",
 			wantAnswerText: "Validado",
 			assertService: func(t *testing.T, v *fakeValidator, d *fakeDebator) {
@@ -170,7 +170,7 @@ func TestReviewCallbackHappyPath(t *testing.T) {
 		{
 			name:           "proposed + deprecate dispatches to Validate(target=deprecated)",
 			sourceStatus:   domain.KnowledgeObjectStatusProposed,
-			action:         app.TelegramReviewActionDeprecate,
+			action:         TelegramReviewActionDeprecate,
 			wantEditedText: "deprecado",
 			wantAnswerText: "Deprecado",
 			assertService: func(t *testing.T, v *fakeValidator, d *fakeDebator) {
@@ -185,7 +185,7 @@ func TestReviewCallbackHappyPath(t *testing.T) {
 		{
 			name:           "proposed + debate dispatches to MarkDebating(human, no SuggestedBy)",
 			sourceStatus:   domain.KnowledgeObjectStatusProposed,
-			action:         app.TelegramReviewActionDebate,
+			action:         TelegramReviewActionDebate,
 			wantEditedText: "debate",
 			wantAnswerText: "En debate",
 			assertService: func(t *testing.T, v *fakeValidator, d *fakeDebator) {
@@ -210,7 +210,7 @@ func TestReviewCallbackHappyPath(t *testing.T) {
 		{
 			name:           "debating + validate dispatches to ResolveDebate(target=validated)",
 			sourceStatus:   domain.KnowledgeObjectStatusDebating,
-			action:         app.TelegramReviewActionValidate,
+			action:         TelegramReviewActionValidate,
 			wantEditedText: "validado",
 			wantAnswerText: "Validado",
 			assertService: func(t *testing.T, v *fakeValidator, d *fakeDebator) {
@@ -232,7 +232,7 @@ func TestReviewCallbackHappyPath(t *testing.T) {
 		{
 			name:           "debating + deprecate dispatches to ResolveDebate(target=deprecated)",
 			sourceStatus:   domain.KnowledgeObjectStatusDebating,
-			action:         app.TelegramReviewActionDeprecate,
+			action:         TelegramReviewActionDeprecate,
 			wantEditedText: "deprecado",
 			wantAnswerText: "Deprecado",
 			assertService: func(t *testing.T, v *fakeValidator, d *fakeDebator) {
@@ -313,7 +313,7 @@ func TestReviewCallbackSkipAdvancesToNextCard(t *testing.T) {
 		ActorID:        fromID,
 		ChatID:         chatID,
 		ObjectID:       firstID,
-		Action:         app.TelegramReviewActionSkip,
+		Action:         TelegramReviewActionSkip,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 		NextCursor:     "cursor-after-first",
 	}
@@ -399,7 +399,7 @@ func TestReviewCallbackSkipEmptyBacklog(t *testing.T) {
 		ActorID:        fromID,
 		ChatID:         chatID,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionSkip,
+		Action:         TelegramReviewActionSkip,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 		NextCursor:     "cursor-end",
 	}
@@ -482,7 +482,7 @@ func TestReviewCallbackReplay(t *testing.T) {
 		ActorID:        fromID,
 		ChatID:         chatID,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -527,7 +527,7 @@ func TestReviewCallbackExpiredToken(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 		ExpiresAt:      time.Now().Add(-1 * time.Hour),
 	}
@@ -608,7 +608,7 @@ func TestReviewCallbackAuthMismatchActor(t *testing.T) {
 		ActorID:        200, // original
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -645,7 +645,7 @@ func TestReviewCallbackAuthMismatchChat(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100, // original
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -689,7 +689,7 @@ func TestReviewCallbackStaleStatus(t *testing.T) {
 		ActorID:        fromID,
 		ChatID:         chatID,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -727,7 +727,7 @@ func TestReviewCallbackFinderNotFound(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -765,7 +765,7 @@ func TestReviewCallbackFinderNil(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -805,7 +805,7 @@ func TestReviewCallbackServiceErrInvalidTransition(t *testing.T) {
 		ActorID:        fromID,
 		ChatID:         chatID,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -840,7 +840,7 @@ func TestReviewCallbackServiceErrNotFound(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -875,7 +875,7 @@ func TestReviewCallbackServiceTransient(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -910,7 +910,7 @@ func TestReviewCallbackValidatorNil(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -938,7 +938,7 @@ func TestReviewCallbackDebaterNil(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionDebate,
+		Action:         TelegramReviewActionDebate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)
@@ -975,7 +975,7 @@ func TestReviewCallbackUnknownSourceAction(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusDeprecated,
 	}
 	seedReviewAction(t, store, action)
@@ -1014,7 +1014,7 @@ func TestReviewCallbackFinderCalledOnce(t *testing.T) {
 		ActorID:        200,
 		ChatID:         100,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 	}
 	seedReviewAction(t, store, action)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/frankirova/project-brain/internal/app"
 	"github.com/frankirova/project-brain/internal/domain"
+	"github.com/frankirova/project-brain/internal/telegram"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,11 +20,11 @@ func sampleTelegramReviewAction() app.TelegramReviewAction {
 		ActorID:        12345,
 		ChatID:         4242,
 		ObjectID:       uuid.New(),
-		Action:         app.TelegramReviewActionValidate,
+		Action:         telegram.TelegramReviewActionValidate,
 		ExpectedStatus: domain.KnowledgeObjectStatusProposed,
 		NextCursor:     "next-page-token",
 		CreatedAt:      time.Date(2026, 6, 12, 12, 0, 0, 0, time.UTC),
-		ExpiresAt:      time.Now().Add(app.TelegramReviewActionTTL),
+		ExpiresAt:      time.Now().Add(telegram.TelegramReviewActionTTL),
 	}
 }
 

@@ -61,19 +61,19 @@ type backlogButtonSpec struct {
 //     keeps the handler total and avoids a panic if the backlog
 //     query ever returns an unknown value.
 func backlogButtonsForStatus(status string) []backlogButtonSpec {
-	skip := backlogButtonSpec{Action: app.TelegramReviewActionSkip, Label: "⏭ Skip"}
+	skip := backlogButtonSpec{Action: TelegramReviewActionSkip, Label: "⏭ Skip"}
 	switch status {
 	case domain.KnowledgeObjectStatusProposed:
 		return []backlogButtonSpec{
-			{Action: app.TelegramReviewActionValidate, Label: "✅ Validate"},
-			{Action: app.TelegramReviewActionDebate, Label: "💬 Debate"},
-			{Action: app.TelegramReviewActionDeprecate, Label: "🗑 Deprecate"},
+			{Action: TelegramReviewActionValidate, Label: "✅ Validate"},
+			{Action: TelegramReviewActionDebate, Label: "💬 Debate"},
+			{Action: TelegramReviewActionDeprecate, Label: "🗑 Deprecate"},
 			skip,
 		}
 	case domain.KnowledgeObjectStatusDebating:
 		return []backlogButtonSpec{
-			{Action: app.TelegramReviewActionValidate, Label: "✅ Validate"},
-			{Action: app.TelegramReviewActionDeprecate, Label: "🗑 Deprecate"},
+			{Action: TelegramReviewActionValidate, Label: "✅ Validate"},
+			{Action: TelegramReviewActionDeprecate, Label: "🗑 Deprecate"},
 			skip,
 		}
 	case domain.KnowledgeObjectStatusDeprecated:

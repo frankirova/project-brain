@@ -44,30 +44,30 @@ func TestBacklogButtonsForStatus(t *testing.T) {
 			name:   "proposed exposes validate, debate, deprecate, skip",
 			status: domain.KnowledgeObjectStatusProposed,
 			wantActions: []string{
-				app.TelegramReviewActionValidate,
-				app.TelegramReviewActionDebate,
-				app.TelegramReviewActionDeprecate,
-				app.TelegramReviewActionSkip,
+				TelegramReviewActionValidate,
+				TelegramReviewActionDebate,
+				TelegramReviewActionDeprecate,
+				TelegramReviewActionSkip,
 			},
 		},
 		{
 			name:   "debating drops debate, keeps terminal + skip",
 			status: domain.KnowledgeObjectStatusDebating,
 			wantActions: []string{
-				app.TelegramReviewActionValidate,
-				app.TelegramReviewActionDeprecate,
-				app.TelegramReviewActionSkip,
+				TelegramReviewActionValidate,
+				TelegramReviewActionDeprecate,
+				TelegramReviewActionSkip,
 			},
 		},
 		{
 			name:        "deprecated shows only skip",
 			status:      domain.KnowledgeObjectStatusDeprecated,
-			wantActions: []string{app.TelegramReviewActionSkip},
+			wantActions: []string{TelegramReviewActionSkip},
 		},
 		{
 			name:        "unknown status falls back to skip only",
 			status:      domain.KnowledgeObjectStatusActive,
-			wantActions: []string{app.TelegramReviewActionSkip},
+			wantActions: []string{TelegramReviewActionSkip},
 		},
 	}
 	for _, tt := range tests {
@@ -90,10 +90,10 @@ func TestBacklogButtonsForStatus(t *testing.T) {
 
 func TestAssembleBacklogRowsPairsSpecsWithTokens(t *testing.T) {
 	specs := []backlogButtonSpec{
-		{Action: app.TelegramReviewActionValidate, Label: "✅ Validate"},
-		{Action: app.TelegramReviewActionDebate, Label: "💬 Debate"},
-		{Action: app.TelegramReviewActionDeprecate, Label: "🗑 Deprecate"},
-		{Action: app.TelegramReviewActionSkip, Label: "⏭ Skip"},
+		{Action: TelegramReviewActionValidate, Label: "✅ Validate"},
+		{Action: TelegramReviewActionDebate, Label: "💬 Debate"},
+		{Action: TelegramReviewActionDeprecate, Label: "🗑 Deprecate"},
+		{Action: TelegramReviewActionSkip, Label: "⏭ Skip"},
 	}
 	tokens := []string{"t1", "t2", "t3", "t4"}
 	rows := assembleBacklogRows(specs, tokens)
@@ -121,7 +121,7 @@ func TestAssembleBacklogRowsPairsSpecsWithTokens(t *testing.T) {
 
 func TestAssembleBacklogRowsSingleButtonOnLastRow(t *testing.T) {
 	specs := []backlogButtonSpec{
-		{Action: app.TelegramReviewActionSkip, Label: "⏭ Skip"},
+		{Action: TelegramReviewActionSkip, Label: "⏭ Skip"},
 	}
 	rows := assembleBacklogRows(specs, []string{"t1"})
 	if len(rows) != 1 || len(rows[0]) != 1 {
@@ -139,7 +139,7 @@ func TestAssembleBacklogRowsPanicsOnCountMismatch(t *testing.T) {
 		}
 	}()
 	assembleBacklogRows(
-		[]backlogButtonSpec{{Action: app.TelegramReviewActionValidate}},
+		[]backlogButtonSpec{{Action: TelegramReviewActionValidate}},
 		[]string{"t1", "t2"},
 	)
 }
