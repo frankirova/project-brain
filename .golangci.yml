@@ -23,10 +23,12 @@
 #                   `linters.exclusions.paths` below.
 #   P2 (after PR2 + PR3) — drop `internal/app/` and `cmd/` from the baseline;
 #                         all violations in those trees must be fixed first.
-#   P3 (after PR4 + PR5 + PR6) — drop the remaining 4 paths
+#   P3 (after PR4 + PR5 + PR6) — drop the remaining 3 paths
 #                                (`internal/telegram/`, `internal/postgres/
-#                                repositories.go`, `internal/postgres/
 #                                migrations.go`, `internal/runtime/`).
+#   Note: `internal/postgres/repositories.go` was deleted in PR3 (the file
+#   was split into per-table repos); that baseline entry was removed in
+#   the same commit.
 #   Final — baseline list is empty; `golangci-lint run` reports zero issues
 #           on the full tree.
 #
@@ -125,16 +127,17 @@ linters:
   # the contract spelled out in `repo-quality` §"baseline ignores for
   # existing debt" and must shrink in lockstep with the change-18 PR chain.
   #
-  # Per-path notes (as-of PR1):
+  # Per-path notes (as-of PR3):
   #   - `internal/app/`                     — refactored in PR2 + PR4; P2 drop
   #   - `internal/telegram/`                — refactored in PR5; P3 drop
-  #   - `internal/postgres/repositories.go` — split in PR3; P3 drop
   #   - `internal/postgres/migrations.go`   — does NOT exist yet at PR1; this
   #       entry is a forward declaration for when migrations move into Go
   #       (currently SQL is in `/migrations/*.sql`). P3 drop.
   #   - `internal/runtime/`                 — does NOT exist yet at PR1;
   #       created in PR6. P3 drop.
   #   - `cmd/`                              — slimmed in PR6; P2 drop.
+  #   (The `internal/postgres/repositories.go` entry was removed in PR3
+  #    when the file was split; the entry is no longer needed.)
   #
   # -----------------------------------------------------------------------------
   # Test-file exemptions (universal Go convention, NOT a debt workaround).
@@ -155,7 +158,6 @@ linters:
     paths:
       - internal/app/
       - internal/telegram/
-      - internal/postgres/repositories.go
       - internal/postgres/migrations.go
       - internal/runtime/
       - cmd/
@@ -183,7 +185,6 @@ formatters:
     paths:
       - internal/app/
       - internal/telegram/
-      - internal/postgres/repositories.go
       - internal/postgres/migrations.go
       - internal/runtime/
       - cmd/

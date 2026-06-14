@@ -40,16 +40,16 @@ Chain strategy: feature-branch-chain
 
 ### PR3 (≤ 400)
 
-- [ ] 1.1 Read `repositories.go` + `db.go`; map UoW bundles
-- [ ] 1.2 Create `object_relations_repo.go`
-- [ ] 1.3 Create `sdd_documents_repo.go`
-- [ ] 1.4 Create `raw_inputs_repo.go`
-- [ ] 1.5 Create `knowledge_objects_repo.go`
-- [ ] 1.6 Create per-table files: audit_events, review_actions, pending_validations
-- [ ] 1.7 Delete `repositories.go`
-- [ ] 1.8 `WithinIngestionTx` in `db.go` byte-identical
-- [ ] 1.9 `go build ./...` clean; `go test ./internal/postgres/...` green
-- [ ] 1.10 `go test -short ./...` green; each `*_repo.go` ≤ 200 LOC
+- [x] 1.1 Read `repositories.go` + `db.go`; map UoW bundles
+- [x] 1.2 Create `object_relations_repo.go`
+- [x] 1.3 Create `sdd_documents_repo.go` _(already split in prior PR — sdd_documents.go; no-op)_
+- [x] 1.4 Create `raw_inputs_repo.go` _(already split in prior PR — raw_input_repo.go; no-op)_
+- [x] 1.5 Create `knowledge_objects_repo.go`
+- [x] 1.6 Create per-table files: audit_events, review_actions, pending_validations _(audit_events created; review_actions + pending_validations already split in prior PRs)_
+- [x] 1.7 Delete `repositories.go`
+- [x] 1.8 `WithinIngestionTx` in `db.go` byte-identical
+- [x] 1.9 `go build ./...` clean; `go test ./internal/postgres/...` green
+- [x] 1.10 `go test -short ./...` green; each `*_repo.go` ≤ 200 LOC
 **Verify** — `knowledge-core-ingestion` §"repo files split by UoW" + §"no behavior change"
 
 ### PR4 (≤ 400)
