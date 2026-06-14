@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestClassifySection(t *testing.T) {
 
 func TestAppendValidatedObject_NewEntry(t *testing.T) {
 	repo := newFakeSddRepo()
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 
 	obj := domain.KnowledgeObject{
 		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000001"),
@@ -74,7 +75,7 @@ func TestAppendValidatedObject_NewEntry(t *testing.T) {
 
 func TestAppendValidatedObject_RevalidateSameIDNoDuplicate(t *testing.T) {
 	repo := newFakeSddRepo()
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 	objID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
 
 	obj := domain.KnowledgeObject{
@@ -104,7 +105,7 @@ func TestAppendValidatedObject_RevalidateSameIDNoDuplicate(t *testing.T) {
 
 func TestAppendValidatedObject_TypeChangeMovesAcrossSections(t *testing.T) {
 	repo := newFakeSddRepo()
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 	objID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
 
 	// First validate as decision.
@@ -134,7 +135,7 @@ func TestAppendValidatedObject_TypeChangeMovesAcrossSections(t *testing.T) {
 
 func TestGetDocument_ErrNotFoundPropagates(t *testing.T) {
 	repo := newFakeSddRepo() // empty — no rows
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 
 	_, err := svc.GetDocument(context.Background(), "ws-empty")
 	if !errors.Is(err, ErrNotFound) {
@@ -158,7 +159,7 @@ func TestAppendValidatedObject_SortedByUpdatedAtDesc(t *testing.T) {
 	}
 
 	repo := newFakeSddRepo()
-	svc := NewSddDocumentService(repo, clk, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), clk, nil)
 
 	obj1 := domain.KnowledgeObject{
 		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000010"),
@@ -189,7 +190,7 @@ func TestAppendValidatedObject_SortedByUpdatedAtDesc(t *testing.T) {
 
 func TestAppendValidatedObject_DeprecatedRemovesEntry(t *testing.T) {
 	repo := newFakeSddRepo()
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 	objID := uuid.MustParse("00000000-0000-0000-0000-000000000020")
 
 	// Validate first.
@@ -218,7 +219,7 @@ func TestAppendValidatedObject_DeprecatedRemovesEntry(t *testing.T) {
 
 func TestAppendValidatedObject_DeprecateAbsentIsNoOp(t *testing.T) {
 	repo := newFakeSddRepo()
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 
 	// Seed a different object so the document exists.
 	seed := domain.KnowledgeObject{
@@ -248,7 +249,7 @@ func TestAppendValidatedObject_DeprecateAbsentIsNoOp(t *testing.T) {
 
 func TestAppendValidatedObject_DeprecateEmptyDocIsNoOp(t *testing.T) {
 	repo := newFakeSddRepo() // no rows
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 
 	obj := domain.KnowledgeObject{
 		ID:          uuid.MustParse("00000000-0000-0000-0000-000000000040"),
@@ -295,6 +296,87 @@ func (r *fakeSddRepo) Upsert(_ context.Context, doc domain.SddDocument) error {
 // Ensure fakeSddRepo satisfies the interface.
 var _ SddDocumentRepository = (*fakeSddRepo)(nil)
 
+// ---------------------------------------------------------------------------
+// Fake SddDocumentUnitOfWork — wraps a SddDocumentRepository so it can be
+// handed to the SddDocumentService. The callback runs synchronously
+// (no real tx). Used by all existing unit tests.
+// ---------------------------------------------------------------------------
+
+type fakeSddDocUOW struct {
+	repo SddDocumentRepository
+}
+
+func newFakeSddDocUOW(repo SddDocumentRepository) *fakeSddDocUOW {
+	return &fakeSddDocUOW{repo: repo}
+}
+
+func (u *fakeSddDocUOW) WithinSddDocumentTx(ctx context.Context, fn func(context.Context, SddDocumentRepository) error) error {
+	return fn(ctx, u.repo)
+}
+
+func (u *fakeSddDocUOW) SddDocuments() SddDocumentRepository {
+	return u.repo
+}
+
+var _ SddDocumentUnitOfWork = (*fakeSddDocUOW)(nil)
+
+// ---------------------------------------------------------------------------
+// Thread-safe fake repo + mutex-serialized UoW for the unit-level
+// concurrency test. The serialization is what a real
+// WithinSddDocumentTx (with SELECT ... FOR UPDATE) provides; the
+// mutex here is the in-process analogue. The map and slice mutations
+// are guarded by mu so the test is race-clean.
+// ---------------------------------------------------------------------------
+
+type threadSafeFakeSddRepo struct {
+	mu   sync.Mutex
+	docs map[string]domain.SddDocument
+}
+
+func newThreadSafeFakeSddRepo() *threadSafeFakeSddRepo {
+	return &threadSafeFakeSddRepo{docs: make(map[string]domain.SddDocument)}
+}
+
+func (r *threadSafeFakeSddRepo) FindByWorkspace(_ context.Context, workspaceID string) (domain.SddDocument, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	doc, ok := r.docs[workspaceID]
+	if !ok {
+		return domain.SddDocument{}, ErrNotFound
+	}
+	return doc, nil
+}
+
+func (r *threadSafeFakeSddRepo) Upsert(_ context.Context, doc domain.SddDocument) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.docs[doc.WorkspaceID] = doc
+	return nil
+}
+
+var _ SddDocumentRepository = (*threadSafeFakeSddRepo)(nil)
+
+type serializingSddDocUOW struct {
+	mu   sync.Mutex
+	repo SddDocumentRepository
+}
+
+func newSerializingSddDocUOW(repo SddDocumentRepository) *serializingSddDocUOW {
+	return &serializingSddDocUOW{repo: repo}
+}
+
+func (u *serializingSddDocUOW) WithinSddDocumentTx(ctx context.Context, fn func(context.Context, SddDocumentRepository) error) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return fn(ctx, u.repo)
+}
+
+func (u *serializingSddDocUOW) SddDocuments() SddDocumentRepository {
+	return u.repo
+}
+
+var _ SddDocumentUnitOfWork = (*serializingSddDocUOW)(nil)
+
 // fixedNow is a deterministic clock for tests that don't need time variation.
 var fixedNow = func() time.Time {
 	return time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
@@ -319,7 +401,7 @@ var _ SddDocumentRepository = (*failingUpsertRepo)(nil)
 func TestGetDocument_PropagatesRepoError(t *testing.T) {
 	boom := errors.New("db exploded")
 	repo := &failingFindRepo{err: boom}
-	svc := NewSddDocumentService(repo, fixedNow, nil)
+	svc := NewSddDocumentService(newFakeSddDocUOW(repo), fixedNow, nil)
 
 	_, err := svc.GetDocument(context.Background(), "ws-1")
 	if !errors.Is(err, boom) {
@@ -340,3 +422,98 @@ func (r *failingFindRepo) Upsert(_ context.Context, _ domain.SddDocument) error 
 }
 
 var _ SddDocumentRepository = (*failingFindRepo)(nil)
+
+// ---------------------------------------------------------------------------
+// Unit-level concurrent test (no DSN, runs under -race). Exercises the
+// SddDocumentService via a fake UoW whose WithinSddDocumentTx holds a
+// mutex; this is the in-process analogue of the SELECT ... FOR UPDATE
+// the postgres layer provides. The test asserts that 8 concurrent
+// appends to the same workspace_id all land in the final document
+// without being lost or duplicated — proving the service correctly
+// accumulates through the UoW callback.
+//
+// This is a service-level concurrency test, not a lock test. The
+// actual lock semantics (FOR UPDATE) are exercised end-to-end by
+// TestSddDocumentRepo_ConcurrentAppendPreservesAllEntries in
+// internal/postgres/sdd_documents_integration_test.go.
+// ---------------------------------------------------------------------------
+
+func TestAppendValidatedObject_ConcurrentAppendPreservesAllEntries(t *testing.T) {
+	repo := newThreadSafeFakeSddRepo()
+	uow := newSerializingSddDocUOW(repo)
+	svc := NewSddDocumentService(uow, fixedNow, nil)
+
+	workspaceID := "ws-concurrent"
+	const N = 8
+
+	// Deterministic per-goroutine IDs so the assertion is exact
+	// (no need to inspect a UUID library for guarantees about
+	// parallel uuid.New calls).
+	ids := make([]uuid.UUID, N)
+	for i := 0; i < N; i++ {
+		// Last byte 0xN gives 8 unique IDs without depending on
+		// uuid.New() returning distinct values in close succession.
+		base := uuid.MustParse("00000000-0000-0000-0000-000000000000")
+		ids[i] = mustOffsetUUID(base, i+1)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, N)
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			obj := domain.KnowledgeObject{
+				ID:          ids[i],
+				WorkspaceID: workspaceID,
+				Type:        domain.KnowledgeObjectTypeDecision,
+				Title:       titleFor(i),
+				Summary:     "concurrent append",
+				Status:      domain.KnowledgeObjectStatusValidated,
+			}
+			errs <- svc.AppendValidatedObject(context.Background(), obj)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("concurrent AppendValidatedObject returned error: %v", err)
+		}
+	}
+
+	doc, err := repo.FindByWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("FindByWorkspace: %v", err)
+	}
+	entries := doc.Sections[domain.SddSectionDecisions]
+	if len(entries) != N {
+		t.Fatalf("len(decisions) = %d, want %d (no lost updates)", len(entries), N)
+	}
+	got := make(map[uuid.UUID]bool, N)
+	for _, e := range entries {
+		if got[e.ObjectID] {
+			t.Errorf("duplicate entry in final document: %s", e.ObjectID)
+		}
+		got[e.ObjectID] = true
+	}
+	if len(got) != N {
+		t.Errorf("distinct entries in final document = %d, want %d", len(got), N)
+	}
+}
+
+// mustOffsetUUID returns base with the last byte replaced by n.
+// base is the zero UUID; the result is a valid v4-style UUID
+// shape that survives a JSON round-trip.
+func mustOffsetUUID(base uuid.UUID, n int) uuid.UUID {
+	var b [16]byte
+	copy(b[:], base[:])
+	b[15] = byte(n)
+	return uuid.Must(uuid.FromBytes(b[:]))
+}
+
+func titleFor(i int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyz"
+	return "title-" + string(letters[i%len(letters)])
+}

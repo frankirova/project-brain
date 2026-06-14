@@ -120,11 +120,14 @@ func main() {
 		backlogHandler = httpapi.NewBacklogHandler(backlogSvc)
 		validateSvc = app.NewValidateObjectService(pgDB)
 
-		// SDD document write + read path. The repo and service are
-		// constructed once and shared by the HTTP handler and the
-		// post-validation hooks on validateSvc.
-		sddRepo := postgres.NewSddDocumentRepo(pgDB.Pool())
-		sddSvc := app.NewSddDocumentService(sddRepo, time.Now, logger)
+		// SDD document write + read path. The service is built
+		// directly on the *postgres.DB because the DB now satisfies
+		// app.SddDocumentUnitOfWork (it exposes WithinSddDocumentTx
+		// for the contended write path and SddDocuments() for the
+		// pool-backed read path). The row-locked JSONB merge runs
+		// inside WithinSddDocumentTx so concurrent appends on the
+		// same workspace_id never lose entries.
+		sddSvc := app.NewSddDocumentService(pgDB, time.Now, logger)
 		sddDocumentHandler = httpapi.NewSddDocumentHandler(sddSvc)
 		validateSvc.SetPostValidationHook(sddSvc.AppendValidatedObject)
 		validateSvc.SetPostDeprecationHook(sddSvc.AppendValidatedObject)
@@ -178,10 +181,28 @@ func main() {
 
 	handler := httpapi.NewIngestTextHandler(svc, cfg.IngestMaxBytes)
 
-	// Public mux: only the health probe. No auth, no rate limit — health
-	// must work even when the service is being abused or auth is broken.
+	// Readiness probes: built from the same dependencies the public mux
+	// has. When a Postgres backend is wired we add a DB ping (the only
+	// hard dependency on the readiness path for Fase 3); in-memory mode
+	// has no probes, which the readiness handler treats as "ready"
+	// (no dependencies to check). Workers/queues (Fase 4) will be
+	// appended here when they land.
+	var readinessProbes []httpapi.ReadinessProbe
+	if pgDB, ok := uow.(*postgres.DB); ok && pgDB != nil {
+		pool := pgDB.Pool()
+		readinessProbes = append(readinessProbes, func(ctx context.Context) error {
+			return pool.Ping(ctx)
+		})
+	}
+
+	// Public mux: only the health probes. No auth, no rate limit —
+	// health must work even when the service is being abused or auth
+	// is broken. The kubelet cannot present a bearer token, so the
+	// /v1/readiness endpoint is intentionally unauthenticated.
 	publicMux := http.NewServeMux()
 	publicMux.Handle("GET /v1/health", &httpapi.HealthHandler{})
+	publicMux.Handle("GET /v1/liveness", httpapi.NewLivenessHandler())
+	publicMux.Handle("GET /v1/readiness", httpapi.NewReadinessHandler(0, readinessProbes...))
 
 	// Protected mux: ingest endpoint goes through auth then rate limit.
 	// Search and object endpoints are also protected (they read tenant
@@ -223,9 +244,31 @@ func main() {
 
 	// Order: auth first, then rate limit, then handler. Rate limit runs
 	// after auth so unauthenticated floods don't consume buckets.
+	//
+	// Transport timeouts. Load() already rejects non-positive values,
+	// so under normal config the panic below is unreachable. It stays
+	// as defense in depth: if a future refactor hands in a zero-value
+	// Config (e.g. in a test), the server MUST NOT start with an
+	// unprotected transport.
+	readHeaderTimeout := cfg.HTTPReadHeaderTimeout()
+	readTimeout := cfg.HTTPReadTimeout()
+	writeTimeout := cfg.HTTPWriteTimeout()
+	idleTimeout := cfg.HTTPIdleTimeout()
+	if readHeaderTimeout <= 0 || readTimeout <= 0 || writeTimeout <= 0 || idleTimeout <= 0 {
+		logger.Error("http transport timeouts must all be > 0",
+			slog.Duration("read_header_timeout", readHeaderTimeout),
+			slog.Duration("read_timeout", readTimeout),
+			slog.Duration("write_timeout", writeTimeout),
+			slog.Duration("idle_timeout", idleTimeout))
+		panic("http transport timeouts must all be > 0")
+	}
 	server := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: rootMux,
+		Addr:              ":" + cfg.Port,
+		Handler:           rootMux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	go func() {

@@ -26,10 +26,10 @@ type fakeRawInputRepo struct {
 		id      uuid.UUID
 		summary domain.Metadata
 	}
-	createErr          error
-	setPromotedErr     error
-	setDiscardedErr    error
-	setCollSummaryErr  error
+	createErr         error
+	setPromotedErr    error
+	setDiscardedErr   error
+	setCollSummaryErr error
 }
 
 func (r *fakeRawInputRepo) Create(_ context.Context, ri domain.RawInput) error {
