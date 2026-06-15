@@ -35,16 +35,16 @@ func TestBootSlogIdentityHybridSearch_DSNGated(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	cfg := config.Config{
-		Environment:     "development",
-		Port:            "8050",
-		DatabaseDSN:     dsn,
-		AuthToken:       "",
-		TelegramBotToken: "",
-		GeminiAPIKey:    "fake-key-for-test", // NewEmbedder does not call out at construction
-		RateLimitRPS:    5,
-		RateLimitBurst:  10,
-		TrustProxy:      false,
-		IngestMaxBytes:  1 << 20,
+		Environment:       "development",
+		Port:              "8050",
+		DatabaseDSN:       dsn,
+		AuthToken:         "",
+		TelegramBotToken:  "",
+		GeminiAPIKey:      "fake-key-for-test", // NewEmbedder does not call out at construction
+		RateLimitRPS:      5,
+		RateLimitBurst:    10,
+		TrustProxy:        false,
+		IngestMaxBytes:    1 << 20,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
