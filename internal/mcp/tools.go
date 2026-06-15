@@ -74,7 +74,11 @@ func RegisterDefaultTools(s *Server, api knowledgeAPI, defaultWorkspace string) 
 	s.AddTool(
 		"save_knowledge",
 		"Persist a new fact, decision, or note into the team's knowledge base "+
-			"so it can be recalled and collision-checked later.",
+			"so it can be recalled and collision-checked later. "+
+			"Idempotent on retries: re-invoking with the same content in the same "+
+			"workspace returns the existing object with duplicate=true (no new rows "+
+			"written). The MCP layer derives a content+workspace dedup key, not "+
+			"an agent-controlled idempotency key.",
 		objectSchema(
 			map[string]any{
 				"content":      stringProp("The knowledge to store."),
