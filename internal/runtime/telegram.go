@@ -114,12 +114,15 @@ func BuildTelegramBot(ctx context.Context, svcs Services, cfg config.Config, log
 	// tgCfg.Detector (a collisionChecker interface) produces a
 	// non-nil interface wrapping a nil pointer. The handler's nil
 	// check (tgCfg.Detector == nil) would then fail and the first
-	// message would panic. Explicitly nil the interface field when
-	// the source pointer is nil so the handler's nil check takes
-	// the disabled-detector path.
-	if svcs.CollisionDetector == nil {
-		tgCfg.Detector = nil
-	}
+	// message would panic. applyTypedNilDetectorGuard sets the
+	// Config field to a true nil interface when the source pointer
+	// is nil, so the handler's nil check takes the
+	// disabled-detector path. The guard is its own function so the
+	// unit test in typed_nil_test.go can lock the behavior in
+	// isolation (without it, the only way to verify the guard would
+	// be to inspect the unexported collisionChecker field of the
+	// built Handler, which is not accessible from this package).
+	applyTypedNilDetectorGuard(&tgCfg, svcs.CollisionDetector)
 	var errTelegram error
 	tgHandler, errTelegram = telegram.New(tgCfg)
 	if errTelegram != nil {
@@ -143,4 +146,21 @@ func BuildTelegramBot(ctx context.Context, svcs Services, cfg config.Config, log
 	}()
 
 	return &TelegramBot{Handler: tgHandler, Bot: b, Wait: botWG}, nil
+}
+
+// applyTypedNilDetectorGuard sets cfg.Detector to the
+// collisionChecker equivalent of d: when d is the typed-nil
+// pointer, the field is set to a true nil interface (not a
+// typed-nil boxed in a non-nil interface); when d is non-nil, the
+// field holds the pointer. The guard is its own function so the
+// behavior is testable from this package (the collisionChecker
+// type lives in the telegram package and is not exported, so the
+// only way to verify the guard's effect on the Config field is
+// to read it back via the public field and compare to nil).
+func applyTypedNilDetectorGuard(cfg *telegram.Config, d *app.CollisionDetector) {
+	if d == nil {
+		cfg.Detector = nil
+		return
+	}
+	cfg.Detector = d
 }
