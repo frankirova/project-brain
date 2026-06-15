@@ -204,3 +204,55 @@ func TestLoadHTTPTimeoutMalformedFallsBack(t *testing.T) {
 		t.Errorf("ReadTimeout = %s, want default %s (malformed env should fall back)", cfg.ReadTimeout, defaultHTTPReadTimeout)
 	}
 }
+
+func TestLoadSecurityHeadersDefaults(t *testing.T) {
+	// Both env vars unset. Security headers default ON; TLS
+	// defaults OFF. A fresh dev / test instance running on
+	// plain HTTP should not advertise an HSTS upgrade.
+	t.Setenv("PROJECT_BRAIN_SECURITY_HEADERS", "")
+	t.Setenv("PROJECT_BRAIN_TLS", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !cfg.SecurityHeadersEnabled {
+		t.Errorf("SecurityHeadersEnabled = false, want true (default)")
+	}
+	if cfg.TLSEnabled {
+		t.Errorf("TLSEnabled = true, want false (default)")
+	}
+}
+
+func TestLoadSecurityHeadersOverrides(t *testing.T) {
+	cases := []struct {
+		name        string
+		headersEnv  string
+		tlsEnv      string
+		wantHeaders bool
+		wantTLS     bool
+	}{
+		{name: "both off", headersEnv: "false", tlsEnv: "false", wantHeaders: false, wantTLS: false},
+		{name: "headers off, tls on", headersEnv: "false", tlsEnv: "true", wantHeaders: false, wantTLS: true},
+		{name: "headers on, tls on", headersEnv: "true", tlsEnv: "true", wantHeaders: true, wantTLS: true},
+		{name: "1 / 0 accepted", headersEnv: "1", tlsEnv: "0", wantHeaders: true, wantTLS: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PROJECT_BRAIN_SECURITY_HEADERS", tc.headersEnv)
+			t.Setenv("PROJECT_BRAIN_TLS", tc.tlsEnv)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() returned error: %v", err)
+			}
+			if cfg.SecurityHeadersEnabled != tc.wantHeaders {
+				t.Errorf("SecurityHeadersEnabled = %v, want %v", cfg.SecurityHeadersEnabled, tc.wantHeaders)
+			}
+			if cfg.TLSEnabled != tc.wantTLS {
+				t.Errorf("TLSEnabled = %v, want %v", cfg.TLSEnabled, tc.wantTLS)
+			}
+		})
+	}
+}
