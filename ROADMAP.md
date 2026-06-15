@@ -18,22 +18,16 @@ Estado vivo del proyecto. Fases completadas colapsadas; solo queda lo pendiente.
 
 ---
 
-## 🔜 Próximo — Hardening batch (producción)
+## ✅ Hardening batch (producción) — cerrado
 
-Auditoría reciente identificó riesgos de producción que preceden a Fase 4. Conviene vaciar esto antes de introducir agentes.
+Change-16 (PR1→PR5) cerró el batch original de hallazgos CRITICAL/HIGH y los MEDIUMs de tooling. Estado detallado en **Deuda técnica abierta** más abajo.
 
-| Prioridad | Hallazgo | Acción propuesta |
-|---|---|---|
-| CRITICAL | Auth puede quedar desactivada en producción si `PROJECT_BRAIN_AUTH_TOKEN` está vacío | Fail-closed en production: exigir token si `PROJECT_BRAIN_ENV=production` |
-| HIGH | HTTP server sin `ReadHeaderTimeout` / `ReadTimeout` / `WriteTimeout` / `IdleTimeout` | Configurar timeouts en `cmd/api/main.go` y testearlos |
-| HIGH | `SddDocument` hace read-modify-write JSONB fuera de tx de validación — pierde updates concurrentes | Mover upsert dentro de la tx, lock por `workspace_id`, o versionado optimista |
-| HIGH | `/v1/health` es solo liveness, no readiness | Separar `/health`, `/readiness`, `/liveness` (readiness checkea DB, workers, queues) |
-| MEDIUM | `gofmt` drift en `internal/domain/raw_input.go` y `internal/telegram/handler_test.go` | `gofmt -w` y commit dedicado |
-| MEDIUM | `cmd/api` 0% coverage | Tests de wiring crítico en composition root |
-| MEDIUM | Postgres integration tests quedan skipped en `-short` | Mantener DSN-gated, asegurar CI con DB real |
-| MEDIUM | No hay CI visible en `.github/**` | Agregar workflow mínimo: `go test -short`, `go vet`, `gofmt -l` |
-
-**Esfuerzo**: Medium — varios PRs chicos, idealmente chained para mantener budget.
+**Pendientes residuales** (no bloquean Fase 4, entran como follow-ups):
+- `cmd/api` composition root: tests actuales son backstop estructural (`main_test.go`, `auth_invariance_test.go`). Falta suite de wiring completa.
+- Postgres integration tests: DSN-gated, mantener cuando entre Fase 4.
+- Envelope de error uniforme (RFC7807) en HTTP.
+- Security headers globales en HTTP middleware.
+- Refactor progresivo de `cmd/api/main.go` para partir el composition root (próximo change).
 
 ---
 
