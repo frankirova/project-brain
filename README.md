@@ -161,6 +161,8 @@ PROJECT_BRAIN_TEST_DATABASE_DSN="postgres://postgres:postgres@127.0.0.1:5433/pro
 | `PROJECT_BRAIN_SHUTDOWN_SECS` | `5` | Grace period para shutdown |
 | `PROJECT_BRAIN_TEST_DATABASE_DSN` | empty | Habilita integration tests de Postgres |
 | `PROJECT_BRAIN_MCP_WORKSPACE` | `default` | (Solo `cmd/mcp`) `workspace_id` por defecto cuando el agente omite el argumento |
+| `PROJECT_BRAIN_SECURITY_HEADERS` | `true` | Setea los 6 headers OWASP 2025 baseline en cada response. `false` los desactiva por completo. |
+| `PROJECT_BRAIN_TLS` | `false` | Emite `Strict-Transport-Security` cuando el API se sirve sobre HTTPS (típicamente detrás de un reverse proxy con TLS). |
 
 ---
 
