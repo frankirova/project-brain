@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -12,6 +13,14 @@ import (
 	"github.com/frankirova/project-brain/internal/gemini"
 	"github.com/frankirova/project-brain/internal/httpapi"
 	"github.com/frankirova/project-brain/internal/postgres"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// errNilConfig / errNilLogger guard BuildServicesWithPool against
+// programming errors at new call sites (PR2 main.go).
+var (
+	errNilConfig = errors.New("runtime.BuildServicesWithPool: cfg is nil")
+	errNilLogger = errors.New("runtime.BuildServicesWithPool: logger is nil")
 )
 
 // Services is the wired service-layer bundle BuildServices returns.
@@ -63,18 +72,56 @@ type Services struct {
 // gates the same set of dependent services; the embedder is shared
 // between the write path (post-ingest hook) and the read path
 // (composite retriever).
+//
+// BuildServices is a thin wrapper around BuildServicesWithPool: it
+// opens the pgxpool from cfg.DatabaseDSN (or passes nil for the
+// in-memory branch) and delegates. The split exists so the
+// composition root owns the pool — one pool used by both the
+// migration runner and the service layer.
 func BuildServices(ctx context.Context, cfg config.Config, logger *slog.Logger) (Services, error) {
-	// Persistence selection: PostgreSQL if DSN set, in-memory fake if not.
+	if cfg.DatabaseDSN == "" {
+		// In-memory fallback (tests, dev mode). No pool to own; delegate with a nil pool.
+		return BuildServicesWithPool(ctx, &cfg, nil, logger)
+	}
+	pgDB, err := postgres.OpenWithLogger(ctx, cfg.DatabaseDSN, logger)
+	if err != nil {
+		logger.Error("open database", slog.String("error", err.Error()))
+		return Services{}, err
+	}
+	return BuildServicesWithPool(ctx, &cfg, pgDB.Pool(), logger)
+}
+
+// BuildServicesWithPool wires the service-layer dependencies
+// around a pre-opened pgxpool. The pool is owned by the caller —
+// when non-nil, DBCloser closes it on shutdown; when nil, the
+// in-memory UoW branch is taken (DBCloser is a no-op). The split
+// lets the composition root build the pool once for both the
+// migration runner and the service layer, avoiding the race
+// between a pre-service schema step and a read path (forbidden
+// by the db-migrations spec).
+//
+// cfg is a pointer so the wrapper passes &cfg through without
+// copying the struct; BuildServices still takes a value, so
+// existing call sites (boot_test.go, etc.) need no change.
+func BuildServicesWithPool(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (Services, error) {
+	if cfg == nil {
+		return Services{}, errNilConfig
+	}
+	if logger == nil {
+		return Services{}, errNilLogger
+	}
+
+	// PostgreSQL if pool is non-nil, in-memory fake otherwise.
+	// main() enforces EnforceInMemoryProductionGuard first.
 	var uow app.IngestionUnitOfWork
 	var dbCloser func()
-	if cfg.DatabaseDSN != "" {
-		db, err := postgres.Open(ctx, cfg.DatabaseDSN)
-		if err != nil {
-			logger.Error("open database", slog.String("error", err.Error()))
-			return Services{}, err
-		}
-		uow = db
-		dbCloser = db.Close
+	if pool != nil {
+		// postgres.New wraps the pool without taking ownership: closing
+		// the *postgres.DB closes the pool (which DBCloser wants) and
+		// exposes Pool() for the read-path services.
+		pgDB := postgres.New(pool)
+		uow = pgDB
+		dbCloser = pool.Close
 		logger.Info("postgres connection opened")
 	} else {
 		uow = inmem.NewUOW()
