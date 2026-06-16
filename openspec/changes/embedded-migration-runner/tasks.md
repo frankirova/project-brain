@@ -36,9 +36,9 @@ Chain strategy: feature-branch-chain
 
 ## Phase 2: Integration (PR2)
 
-- [ ] 2.1 Modify `cmd/api/main.go`: open one `pgxpool` from `cfg.DatabaseDSN`; call `migrations.Run(ctx, pool, migrations.FS)`; on error `slog.Error(version, err)` then `os.Exit(1)`; hand same pool to `runtime.BuildServicesWithPool`. Preserve ordering 5<6<7<8. Covers spec §Auto-Apply on Startup, §Fail-Fast on Migration Error.
-- [ ] 2.2 Modify `docker-compose.yml`: delete `./migrations:/docker-entrypoint-initdb.d:ro` mount (line 17); rewrite comment lines 12-16 to "migrations applied by the API on startup"; verify `docker compose config` parses.
-- [ ] 2.3 Verify `Dockerfile` needs NO change (SQL embedded at build time via `//go:embed`; no runtime COPY/mount required). Confirm by reading COPY instructions.
+- [x] 2.1 Modify `cmd/api/main.go`: open one `pgxpool` from `cfg.DatabaseDSN`; call `migrations.Run(ctx, pool, migrations.FS)`; on error `slog.Error(version, err)` then `os.Exit(1)`; hand same pool to `runtime.BuildServicesWithPool`. Preserve ordering 5<6<7<8. Covers spec §Auto-Apply on Startup, §Fail-Fast on Migration Error.
+- [x] 2.2 Modify `docker-compose.yml`: delete `./migrations:/docker-entrypoint-initdb.d:ro` mount (line 17); rewrite comment lines 12-16 to "migrations applied by the API on startup"; verify `docker compose config` parses.
+- [x] 2.3 Verify `Dockerfile` needs NO change (SQL embedded at build time via `//go:embed`; no runtime COPY/mount required). Confirm by reading COPY instructions.
 
 ## Phase 3: Documentation & Polish (PR3)
 

@@ -9,12 +9,10 @@ services:
       POSTGRES_DB: project_brain
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Auto-create the tables on first init of an empty data volume. The
-      # Postgres image runs every .sql in here in alphabetical order
-      # (0001..0007). NOTE: this only runs when pgdata is EMPTY. If you've
-      # started the stack before, run `docker compose down -v` first to
-      # wipe the volume so these run on a clean slate.
-      - ./migrations:/docker-entrypoint-initdb.d:ro
+      # Schema lifecycle is owned by the API (see internal/migrations):
+      # migrations are applied on API startup, not by the Postgres
+      # initdb hook. The pgdata volume holds DATA only — schema
+      # ownership lives in the API process.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d project_brain"]
       interval: 3s
