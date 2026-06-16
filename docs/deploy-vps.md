@@ -30,17 +30,10 @@ First time:
 ```bash
 git clone https://github.com/frankirova/project-brain.git
 cd project-brain
-git checkout feat/semantic-search-gemini
+git checkout main
 ```
 
-Updating an existing checkout:
-```bash
-cd project-brain
-git pull
-```
-
-> Until this branch is merged to `main`, stay on
-> `feat/semantic-search-gemini`.
+Updating an existing checkout: see `docs/updating-on-vps.md` for the full procedure.
 
 ---
 
@@ -154,8 +147,8 @@ adapt key names if Hermes differs):
 }
 ```
 
-Restart Hermes. It should now expose three tools: `search_knowledge`,
-`check_collision`, `save_knowledge`.
+Restart Hermes. It should now expose four tools: `search_knowledge`,
+`check_collision`, `save_knowledge`, `get_sdd_document`.
 
 ---
 
@@ -163,6 +156,18 @@ Restart Hermes. It should now expose three tools: `search_knowledge`,
 
 - **Auth token**: set `PROJECT_BRAIN_AUTH_TOKEN` (step 2). Done = every
   endpoint but `/v1/health` requires the Bearer token.
+- **TLS / HSTS**: if the API is behind a TLS-terminating reverse proxy
+  (Nginx, Caddy, Cloudflare Tunnel, etc.), set `PROJECT_BRAIN_TLS=1` in
+  `.env`. The API then emits `Strict-Transport-Security: max-age=63072000;
+  includeSubDomains` on every response. Default off so dev / test
+  instances running on plain HTTP do not advertise HTTPS upgrades.
+- **Security headers**: on by default (`PROJECT_BRAIN_SECURITY_HEADERS=true`).
+  6 OWASP 2025 baseline headers (X-Content-Type-Options, X-Frame-Options,
+  Referrer-Policy, Permissions-Policy, Cross-Origin-Resource-Policy,
+  Cache-Control: no-store) are added to every response, including
+  `/v1/health`, `/v1/liveness`, and `/v1/readiness` (which your
+  kubelet / load balancer uses — these endpoints are also bound to
+  localhost via the next bullet).
 - **Don't expose Postgres/API publicly.** Bind the API to localhost by
   editing `docker-compose.yml`:
   ```yaml
@@ -178,18 +183,7 @@ Restart Hermes. It should now expose three tools: `search_knowledge`,
 
 ## 7. Updating later
 
-```bash
-cd project-brain
-git pull
-docker compose up -d --build           # rebuild API with new code
-docker run --rm -v "$PWD":/app -w /app golang:1.25-alpine \
-  go build -o bin/project-brain-mcp ./cmd/mcp   # rebuild MCP binary
-```
-Migrations: new migration files apply automatically only on an **empty**
-data volume. On an existing database, apply new migrations manually:
-```bash
-docker compose exec -T postgres psql -U postgres -d project_brain < migrations/00NN_whatever.sql
-```
+See `docs/updating-on-vps.md` for the full procedure (3 rebuilds, migration gotcha, verification, rollback).
 
 ---
 

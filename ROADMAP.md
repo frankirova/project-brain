@@ -54,9 +54,6 @@ Cambios estimados: `event-driven-pipeline` (NATS), `agent-framework`, `prompt-re
 - [ ] Decidir si agregar índice en `project_id` cuando exista la tabla `projects`
 - [ ] Evaluar `confidence` negativo: ¿rechazar en app o confiar en el DB?
 - [ ] Considerar `'spanish'` o `'english'` tsvector config por-objeto (hoy es `'simple'` para bilingual MVP)
-- [ ] Envelope de error uniforme (RFC7807) en HTTP
-- [ ] Security headers globales en HTTP middleware
-- [ ] Refactor progresivo de `cmd/api/main.go` para dividir composition root
 
 ---
 
@@ -74,6 +71,9 @@ Cambios estimados: `event-driven-pipeline` (NATS), `agent-framework`, `prompt-re
 | H3 | HTTP server sin timeouts | ✅ Resuelto (change 16, PR2: timeouts configurables en `cmd/api/main.go`) |
 | H4 | SDD document update concurrente | ✅ Resuelto (change 16, PR3: row lock + `WithinSddDocumentTx`) |
 | H5 | Health sin readiness | ✅ Resuelto (change 16, PR4: `/v1/liveness` + `/v1/readiness` con DB ping) |
+| M1 | RFC 7807 problem details | ✅ Resuelto (PR #27: `internal/httpapi/problem` + `application/problem+json` opt-in via `Accept`) |
+| M2 | OWASP security headers | ✅ Resuelto (PR #27: `internal/httpapi/security` + 6 headers baseline + HSTS condicional) |
+| M3 | Composition root split | ✅ Resuelto (change 19: `internal/runtime` con `BuildServices`/`BuildServer`/`BuildTelegramBot`/`RunShutdown`) |
 
 ---
 
