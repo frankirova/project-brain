@@ -1,46 +1,49 @@
-# Deploy project-brain on a VPS
+# Desplegar project-brain en un VPS
 
-Step-by-step to run the backend (API + Postgres + pgvector) on a Linux
-VPS and wire its MCP server into a local Hermes (or any MCP) agent.
+Guía paso a paso para correr el backend (API + Postgres + pgvector) en un
+VPS Linux y conectar su servidor MCP a un agente Hermes local (o a
+cualquier agente MCP).
 
-The stack runs in Docker. The only thing you build outside Docker is the
-small MCP binary the agent launches as a subprocess.
+El stack corre en Docker. Lo único que se compila fuera de Docker es el
+pequeño binario MCP que el agente lanza como subproceso.
 
 ---
 
-## 0. Prerequisites
+## 0. Requisitos previos
 
-On the VPS (Ubuntu/Debian assumed):
+En el VPS (se asume Ubuntu/Debian):
 
-- **Docker + Compose plugin**
+- **Docker + plugin de Compose**
   ```bash
   docker --version
   docker compose version
   ```
-  If missing: `curl -fsSL https://get.docker.com | sh`
-- A **Gemini API key** (https://aistudio.google.com/apikey). Required for
-  semantic search and collision detection.
-- Your **Hermes agent** running on the same VPS (for the stdio MCP transport).
+  Si falta: `curl -fsSL https://get.docker.com | sh`
+- Una **API key de Gemini** (https://aistudio.google.com/apikey). Requerida
+  para la búsqueda semántica y la detección de colisiones.
+- Tu **agente Hermes** corriendo en el mismo VPS (para el transporte MCP
+  por stdio).
 
 ---
 
-## 1. Get the code
+## 1. Obtener el código
 
-First time:
+Primera vez:
 ```bash
 git clone https://github.com/frankirova/project-brain.git
 cd project-brain
 git checkout main
 ```
 
-Updating an existing checkout: see `docs/updating-on-vps.md` for the full procedure.
+Actualizar un checkout existente: consultá `docs/updating-on-vps.md` para
+el procedimiento completo.
 
 ---
 
-## 2. Create the secrets file
+## 2. Crear el archivo de secretos
 
-The API reads secrets from a `.env` file (git-ignored — never committed).
-Create it in the repo root:
+La API lee los secretos desde un archivo `.env` (ignorado por git — nunca
+lo commitees). Crealo en la raíz del repo:
 
 ```bash
 cat > .env <<'EOF'
@@ -49,89 +52,92 @@ PROJECT_BRAIN_AUTH_TOKEN=pick-a-long-random-token
 EOF
 ```
 
-- `PROJECT_BRAIN_GEMINI_API_KEY` — without it, ingest still works but
-  search/collision endpoints are disabled (and the MCP tools fail).
-- `PROJECT_BRAIN_AUTH_TOKEN` — protects every endpoint except `/v1/health`.
-  Strongly recommended on a public VPS. Use the **same** value in the
-  Hermes MCP config (step 5).
+- `PROJECT_BRAIN_GEMINI_API_KEY` — sin ella, el ingest sigue funcionando
+  pero los endpoints de búsqueda / colisión quedan deshabilitados (y las
+  herramientas MCP fallan).
+- `PROJECT_BRAIN_AUTH_TOKEN` — protege todos los endpoints excepto
+  `/v1/health`. Muy recomendado en un VPS público. Usá el **mismo** valor
+  en la config MCP de Hermes (paso 5).
 
-Generate a token quickly:
+Generá un token rápido:
 ```bash
 openssl rand -hex 32
 ```
 
 ---
 
-## 3. Start the stack
+## 3. Levantar el stack
 
 ```bash
 docker compose up -d --build
 ```
 
-This builds the API image, starts Postgres (pgvector), auto-applies all
-migrations on the **first** run (empty data volume), and launches the API
-on port `8050`.
+Esto construye la imagen de la API, levanta Postgres (pgvector), aplica
+automáticamente todas las migraciones en la **primera** ejecución
+(volumen de datos vacío) y lanza la API en el puerto `8050`.
 
-Wait for health:
+Esperá el health check:
 ```bash
 docker compose ps
 curl -s http://localhost:8050/v1/health
 # {"status":"ok"}
 ```
 
-Check the logs say hybrid search is on:
+Verificá en los logs que la búsqueda híbrida esté activa:
 ```bash
 docker compose logs api | grep -i "hybrid search"
 # ... "hybrid search + collision detection enabled" provider=gemini ...
 ```
-If you instead see `search enabled (fts only)`, the Gemini key did not
-load — recheck `.env` and `docker compose up -d` again.
+Si en cambio ves `search enabled (fts only)`, la key de Gemini no se
+cargó — revisá el `.env` y volvé a correr `docker compose up -d`.
 
 ---
 
-## 4. Smoke-test the API
+## 4. Smoke test de la API
 
-Replace `$TOKEN` with your `PROJECT_BRAIN_AUTH_TOKEN`.
+Reemplazá `$TOKEN` con tu `PROJECT_BRAIN_AUTH_TOKEN`.
 
 ```bash
 TOKEN=pick-a-long-random-token
 WS=default
 
-# 1) Save a decision
+# 1) Guardar una decisión
 curl -s -X POST http://localhost:8050/v1/ingest-text \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d "{\"workspace_id\":\"$WS\",\"type\":\"decision\",\"content\":\"El equipo usa Go para el backend\"}"
 
-# 2) Search by meaning
+# 2) Buscar por significado
 curl -s -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8050/v1/search?workspace_id=$WS&q=lenguaje%20del%20servidor"
 
-# 3) Collision check (the killer)
+# 3) Chequeo de colisión (el plato fuerte)
 curl -s -X POST http://localhost:8050/v1/check-collision \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d "{\"workspace_id\":\"$WS\",\"content\":\"Propongo usar Python en vez de Go\"}"
 ```
 
-Step 3 should return the Go decision as a collision.
+El paso 3 debería devolver la decisión sobre Go como colisión.
 
 ---
 
-## 5. Build the MCP binary and wire Hermes
+## 5. Compilar el binario MCP y conectar Hermes
 
-The MCP server is a tiny binary the agent launches over stdio. It forwards
-tool calls to the API on `localhost:8050`, so it only needs the API URL
-and token — never the database credentials.
+El servidor MCP es un binario chico que el agente lanza por stdio.
+Reenvía las llamadas a herramientas a la API en `localhost:8050`, así que
+solo necesita la URL de la API y el token — nunca las credenciales de la
+base de datos.
 
-**Build it (no Go install needed — use the Docker toolchain):**
+**Compilarlo (no necesitás instalar Go — usá el toolchain de Docker):**
 ```bash
 docker run --rm -v "$PWD":/app -w /app golang:1.25-alpine \
   go build -o bin/project-brain-mcp ./cmd/mcp
 ```
-This produces `bin/project-brain-mcp` (a Linux binary). If you already have
-Go 1.25 on the VPS, `go build -o bin/project-brain-mcp ./cmd/mcp` works too.
+Esto produce `bin/project-brain-mcp` (un binario de Linux). Si ya tenés
+Go 1.25 en el VPS, `go build -o bin/project-brain-mcp ./cmd/mcp` también
+funciona.
 
-**Register it in your Hermes MCP config** (standard MCP server shape —
-adapt key names if Hermes differs):
+**Registralo en tu config MCP de Hermes** (forma estándar de servidor
+MCP — adaptá los nombres de las claves si Hermes difiere):
 ```json
 {
   "mcpServers": {
@@ -147,53 +153,57 @@ adapt key names if Hermes differs):
 }
 ```
 
-Restart Hermes. It should now expose four tools: `search_knowledge`,
-`check_collision`, `save_knowledge`, `get_sdd_document`.
+Reiniciá Hermes. Ahora debería exponer cuatro herramientas:
+`search_knowledge`, `check_collision`, `save_knowledge`,
+`get_sdd_document`.
 
 ---
 
-## 6. Hardening (public VPS)
+## 6. Hardening (VPS público)
 
-- **Auth token**: set `PROJECT_BRAIN_AUTH_TOKEN` (step 2). Done = every
-  endpoint but `/v1/health` requires the Bearer token.
-- **TLS / HSTS**: if the API is behind a TLS-terminating reverse proxy
-  (Nginx, Caddy, Cloudflare Tunnel, etc.), set `PROJECT_BRAIN_TLS=1` in
-  `.env`. The API then emits `Strict-Transport-Security: max-age=63072000;
-  includeSubDomains` on every response. Default off so dev / test
-  instances running on plain HTTP do not advertise HTTPS upgrades.
-- **Security headers**: on by default (`PROJECT_BRAIN_SECURITY_HEADERS=true`).
-  6 OWASP 2025 baseline headers (X-Content-Type-Options, X-Frame-Options,
-  Referrer-Policy, Permissions-Policy, Cross-Origin-Resource-Policy,
-  Cache-Control: no-store) are added to every response, including
-  `/v1/health`, `/v1/liveness`, and `/v1/readiness` (which your
-  kubelet / load balancer uses — these endpoints are also bound to
-  localhost via the next bullet).
-- **Don't expose Postgres/API publicly.** Bind the API to localhost by
-  editing `docker-compose.yml`:
+- **Auth token**: configurá `PROJECT_BRAIN_AUTH_TOKEN` (paso 2). Listo =
+  todos los endpoints excepto `/v1/health` requieren el token Bearer.
+- **TLS / HSTS**: si la API está detrás de un reverse proxy que termina
+  TLS (Nginx, Caddy, Cloudflare Tunnel, etc.), configurá
+  `PROJECT_BRAIN_TLS=1` en `.env`. La API entonces emite
+  `Strict-Transport-Security: max-age=63072000; includeSubDomains` en
+  cada respuesta. Apagado por defecto para que las instancias de dev /
+  test corriendo en HTTP plano no publiciten upgrades a HTTPS.
+- **Security headers**: activados por defecto
+  (`PROJECT_BRAIN_SECURITY_HEADERS=true`). 6 headers base de OWASP 2025
+  (X-Content-Type-Options, X-Frame-Options, Referrer-Policy,
+  Permissions-Policy, Cross-Origin-Resource-Policy,
+  Cache-Control: no-store) se agregan a cada respuesta, incluyendo
+  `/v1/health`, `/v1/liveness` y `/v1/readiness` (que usa tu kubelet /
+  load balancer — estos endpoints también están bindeados a localhost en
+  el siguiente bullet).
+- **No expongas Postgres / API públicamente.** Bindeá la API a localhost
+  editando `docker-compose.yml`:
   ```yaml
   api:
     ports:
-      - "127.0.0.1:8050:8050"   # was "8050:8050"
+      - "127.0.0.1:8050:8050"   # antes era "8050:8050"
   ```
-  Same idea for the `postgres` port if you don't need it from outside.
-  Then `docker compose up -d`.
-- Or put a firewall (ufw) in front and only allow what you need.
+  Misma idea para el puerto de `postgres` si no lo necesitás desde
+  afuera. Después `docker compose up -d`.
+- O poné un firewall (ufw) delante y permití solo lo que necesitás.
 
 ---
 
-## 7. Updating later
+## 7. Actualizar más adelante
 
-See `docs/updating-on-vps.md` for the full procedure (3 rebuilds, migration gotcha, verification, rollback).
+Consultá `docs/updating-on-vps.md` para el procedimiento completo
+(3 rebuilds, gotcha de migraciones, verificación, rollback).
 
 ---
 
-## Troubleshooting
+## Solución de problemas
 
-| Symptom | Cause / fix |
-|---------|-------------|
-| `/v1/search` or `/v1/check-collision` → 404 | No Gemini key loaded → check `.env`, restart. |
-| Any protected endpoint → 401 | Missing/wrong `Authorization: Bearer <token>`. |
-| Logs say `running with in-memory uow` | `PROJECT_BRAIN_DATABASE_DSN` not set — compose sets it; you likely ran the API outside compose. |
-| `relation "embeddings" does not exist` | Old data volume from before the migration. `docker compose down -v` to wipe (destroys data) or apply the migration manually. |
-| MCP tools error "connection refused" | API not running, or wrong `PROJECT_BRAIN_API_URL` in the Hermes config. |
-| Collision verdict seems off | Verdict bands are tuned for Gemini Spanish (~0.6 unrelated, ~0.78 collision, ~0.90 duplicate). |
+| Síntoma | Causa / solución |
+|---------|------------------|
+| `/v1/search` o `/v1/check-collision` → 404 | No se cargó la key de Gemini → revisá el `.env`, reiniciá. |
+| Cualquier endpoint protegido → 401 | Falta o es incorrecto el `Authorization: Bearer <token>`. |
+| Los logs dicen `running with in-memory uow` | `PROJECT_BRAIN_DATABASE_DSN` no está seteada — compose la setea; probablemente corriste la API fuera de compose. |
+| `relation "embeddings" does not exist` | Volumen de datos viejo de antes de la migración. `docker compose down -v` para borrarlo (destruye los datos) o aplicá la migración a mano. |
+| Las herramientas MCP tiran "connection refused" | La API no está corriendo, o `PROJECT_BRAIN_API_URL` está mal en la config de Hermes. |
+| El veredicto de colisión parece raro | Los umbrales están calibrados para Gemini en español (~0.6 no relacionado, ~0.78 colisión, ~0.90 duplicado). |
